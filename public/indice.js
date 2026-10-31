@@ -26,28 +26,63 @@
   const RADAR_RANGE = 430; // km útiles
   const BLEND_END = 180; // a los 180 min el radar proyectado ya no pesa
 
-  // ---------- Paleta azul: más oscuro = más intenso ----------
-  const IDX = {
-    levels: C.steps(0, 90, 10),
-    colors: C.ramp(["#eef6fc", "#cfe5f6", "#a8d0ee", "#7db7e3", "#529bd5", "#3580c3", "#2466aa", "#1a4e8e", "#123a70", "#0a2652"], 10),
-    units: "Índice CELESTE, de 0 a 100",
-    clamp: true,
-    fmt: C.fmtNum,
-    words: ["Tranquilo", "Inestable", "Lluvioso", "Tormentoso", "Severo"],
-  };
-  const CLASSES = [[0, "Tranquilo"], [20, "Inestable"], [40, "Lluvioso"], [60, "Tormentoso"], [80, "Severo"]];
-  const className = (v) => CLASSES.filter((c) => v >= c[0]).pop()[1];
-  const inkOn = (v) => (v >= 45 ? "#ffffff" : "#12324a");
-
-  // ---------- Componentes y ponderación ----------
-  const COMPS = [
-    { key: "rain", name: "Lluvia", w: 45, unit: "mm/h", fmt: C.fmtNum1, score: (v) => Math.min(1, Math.log1p(Math.max(0, v)) / Math.log1p(25)) },
-    { key: "cape", name: "Potencial de tormenta", w: 20, unit: "J/kg", fmt: C.fmtNum, score: (v) => clamp(v / 2500) },
-    { key: "gust", name: "Ráfagas de viento", w: 15, unit: "km/h", fmt: C.fmtNum, score: (v) => clamp((v - 25) / 55) },
-    { key: "pp", name: "Probabilidad de lluvia", w: 10, unit: "%", fmt: C.fmtNum, score: (v) => clamp(v / 100) },
-    { key: "heat", name: "Calor", w: 10, unit: "°C de sensación", fmt: C.fmtNum, score: (v) => clamp((v - 30) / 10) },
+  // ---------- Peldaños del índice (nombres ticos) ----------
+  // Cada peldaño ocupa 10 puntos del índice (0–100). La regla de cada uno es objetiva y se basa en lo
+  // que se mide o estima: lluvia (mm/h), nubosidad (%), probabilidad de lluvia, potencial de tormenta y ráfagas.
+  const CLOUD = "M6 14h11a3.6 3.6 0 0 0 .4-7.2A5.5 5.5 0 0 0 5.8 8 3 3 0 0 0 6 14z";
+  const LEVELS = [
+    { n: "Pura vida", d: "Sol y condiciones despejadas.", rule: "Nubosidad menor al 20 % y sin lluvia.",
+      i: '<circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/>' },
+    { n: "Despejadillo", d: "Buen tiempo, algunas nubes.", rule: "Nubosidad del 20 al 45 %, sin lluvia.",
+      i: '<circle cx="8.5" cy="8.5" r="3.3"/><path d="M8.5 2.3v1.5M2.3 8.5h1.5M4.1 4.1l1.1 1.1M12.9 4.1l-1.1 1.1"/><path d="M10 20h8a3 3 0 0 0 .3-6 4.5 4.5 0 0 0-8.6 1.2A2.4 2.4 0 0 0 10 20z"/>' },
+    { n: "Nubladillo", d: "Cielo parcialmente nublado.", rule: "Nubosidad del 45 al 80 %, sin lluvia.",
+      i: '<path d="M14.6 5.6a3.6 3.6 0 0 1 5.6 3.4"/><path d="M17.5 2.5v1.3M22 7.5h-1.3M20.8 3.9l-.9.9"/><path d="M5.5 20h10a3.6 3.6 0 0 0 .4-7.2A5.5 5.5 0 0 0 5.3 14a3 3 0 0 0 .2 6z"/>' },
+    { n: "Amenazando", d: "Se está cerrando el cielo, posibles lluvias.", rule: "Sin lluvia aún, pero nubosidad mayor al 80 %, o nublado con probabilidad de lluvia ≥ 50 % o con potencial de tormenta alto.",
+      i: `<path d="${CLOUD}" fill="currentColor" fill-opacity=".35"/><path d="M9 18.5h6M10.5 21h3"/>` },
+    { n: "Llovizna", d: "Lluvia ligera y pasajera.", rule: "Lluvia de 0,2 a 2,5 mm por hora.",
+      i: `<path d="${CLOUD}"/><path d="M8 17.5v.01M12 18.5v.01M16 17.5v.01M10 21v.01M14 21v.01" stroke-width="2.6"/>` },
+    { n: "Aguacero", d: "Lluvia moderada, por momentos fuerte.", rule: "Lluvia de 2,5 a 7,6 mm por hora.",
+      i: `<path d="${CLOUD}"/><path d="M8.5 16.5l-1.2 3.5M12.5 16.5l-1.2 3.5M16.5 16.5l-1.2 3.5"/>` },
+    { n: "Chaparrón", d: "Lluvia fuerte y localizada.", rule: "Lluvia de más de 7,6 mm por hora en un aguacero corto.",
+      i: `<path d="${CLOUD}" fill="currentColor" fill-opacity=".25"/><path d="M7.5 16l-1.6 5M11 16l-1.6 5M14.5 16l-1.6 5M18 16l-1.6 5" stroke-width="2"/>` },
+    { n: "Temporal", d: "Lluvias intensas y persistentes.", rule: "Más de 7,6 mm por hora con un promedio de 10 mm por hora o más durante ±1 hora.",
+      i: '<path d="M9 9.5h8a3 3 0 0 0 .3-6 4.5 4.5 0 0 0-8.4 1.4A2.4 2.4 0 0 0 9 9.5z" fill="currentColor" fill-opacity=".25"/><path d="M5 15.5h10a3.4 3.4 0 0 0 1.6-.4"/><path d="M5 15.5a2.8 2.8 0 0 1 .2-5.6"/><path d="M6.5 18l-1 3M9.5 18l-1 3M12.5 18l-1 3M15.5 18l-1 3M18.5 13l-1 3M21 12l-1 3"/>' },
+    { n: "Baldazo", d: "Lluvia muy fuerte, con posibles afectaciones.", rule: "Lluvia de 40 mm por hora o más.",
+      i: '<path d="M3.5 4.5l9.5 3.2-2.6 6.8-8.4-3z" fill="currentColor" fill-opacity=".3"/><path d="M13 7.7c2.2 1.6 3.4 4 3.6 6.6M11 14.8c1.4 1.6 2.3 3.6 2.6 6M14.6 16c.8 1.5 1.3 3.1 1.4 4.8M18.2 13.6c.7 1.7 1 3.5 1 5.4M20.6 11.5c.5 1.5.7 3 .7 4.6"/>' },
+    { n: "Vendaval", d: "Condiciones severas, lluvia y fuertes vientos.", rule: "Ráfagas de 70 km/h o más con lluvia de al menos 2,5 mm por hora, o ráfagas de 90 km/h o más.",
+      i: '<path d="M7 11h9a3 3 0 0 0 .3-6A4.6 4.6 0 0 0 7.6 6.3 2.4 2.4 0 0 0 7 11z"/><path d="M2.5 14.5h12a2.3 2.3 0 1 0-2.3-2.3M2.5 18h15.5a2.3 2.3 0 1 1-2.3 2.3M4.5 21.5h6"/>' },
   ];
-  const MODEL_KEYS = ["cape", "gust", "pp", "heat"];
+  // Escala de color: transparente en "Pura vida"; dos tonos extra muy diluidos para "Despejadillo"
+  const IDX = {
+    levels: [10, 15, 20, 30, 40, 50, 60, 70, 80, 90],
+    colors: C.ramp(["#d7ebf8", "#b4d8f1", "#8cc1e7", "#64a6da", "#4189c9", "#2d70b3", "#20599b", "#17467f", "#103462", "#0a2550"], 10),
+    alphas: [0.14, 0.26, 0.4, 0.54, 0.66, 0.76, 0.84, 0.9, 0.95, 1],
+    units: "Índice CELESTE, de 0 a 100",
+    fmt: C.fmtNum,
+  };
+  const levelOf = (v) => (!Number.isFinite(v) || v < 10 ? 0 : Math.min(9, Math.floor(v / 10)));
+  const levelColor = (l) => (l === 0 ? "#f3d36b" : IDX.colors[l === 1 ? 1 : l]);
+  const levelInk = (l) => (l >= 5 ? "#ffffff" : "#12324a");
+  const levelIcon = (l, cls = "lvl-svg") => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${LEVELS[l].i}</svg>`;
+  const levelBadge = (l, cls = "") => `<span class="lvl-badge ${cls}" style="background:${l === 0 ? "#fff6d6" : levelColor(l)};color:${l === 0 ? "#a77b00" : levelInk(l)}" title="${LEVELS[l].n}: ${LEVELS[l].d}">${levelIcon(l)}</span>`;
+  C.levels = { LEVELS, levelOf, levelIcon, levelBadge };
+
+  // Regla de cada celda → valor 0–100 (10 puntos por peldaño; dentro del peldaño, la intensidad)
+  function ladder(R, cloud, pp, cape, gust, persist) {
+    if (gust >= 90 || (gust >= 70 && R >= 2.5)) return 90 + 9.9 * clamp((gust - 70) / 40);
+    if (R >= 40) return 80 + 9.9 * clamp((R - 40) / 60);
+    if (R >= 7.6 && persist >= 10) return 70 + 9.9 * clamp((persist - 10) / 20);
+    if (R >= 7.6) return 60 + 9.9 * clamp(Math.log(R / 7.6) / Math.log(40 / 7.6));
+    if (R >= 2.5) return 50 + 9.9 * clamp((R - 2.5) / 5.1);
+    if (R >= 0.2) return 40 + 9.9 * clamp(Math.log(R / 0.2) / Math.log(12.5));
+    const threat = cloud >= 50 && (pp >= 50 || cape >= 1500);
+    if (cloud >= 80 || threat) return 30 + 9.9 * clamp(Math.max((cloud - 80) / 20, (pp - 50) / 50, (cape - 1500) / 1500, R / 0.2));
+    if (cloud >= 45) return 20 + 9.9 * clamp((cloud - 45) / 35);
+    if (cloud >= 20) return 10 + 9.9 * clamp((cloud - 20) / 25);
+    return 9.9 * clamp(cloud / 20);
+  }
+
+  const MODEL_KEYS = ["cape", "gust", "pp", "heat", "cloud"];
   // Fuentes de la lluvia: cada celda pondera las fuentes que tienen dato ahí (peso × calidad local)
   const RSRC = [
     { key: "radar", name: "Radar COCESNA", w: 50, src: "cocesna" },
@@ -62,24 +97,27 @@
     if (savedS) RSRC.forEach((r) => { if (Number.isFinite(savedS[r.key])) r.w = savedS[r.key]; });
   } catch (e) { /* pesos por defecto */ }
   const RW = () => Object.fromEntries(RSRC.map((r) => [r.key, r.w]));
-  const SUGGESTED = { rain: 45, cape: 20, gust: 15, pp: 10, heat: 10 };
-  try {
-    const saved = JSON.parse(store.get("celeste-pesos") || "null");
-    if (saved) COMPS.forEach((c) => { if (Number.isFinite(saved[c.key])) c.w = saved[c.key]; });
-  } catch (e) { /* pesos por defecto */ }
-
   // ---------- Capa ----------
   map.createPane("indice").style.zIndex = 435;
   map.getPane("indice").style.opacity = 0.85;
   const renderer = L.canvas({ pane: "indice", padding: 0.4 });
-  const layerOf = (geo) => L.geoJSON(geo, {
+  // Herramientas de visualización (se recuerdan en este navegador)
+  const VIZ = Object.assign({ op: 0.9, desde: 1, bordes: false, nubes: false }, (() => { try { return JSON.parse(store.get("celeste-viz") || "{}"); } catch (e) { return {}; } })());
+  map.getPane("indice").style.opacity = VIZ.op;
+  const bandLevel = (i) => (i <= 1 ? 1 : i); // banda de color → peldaño
+  const layerOf = (geo) => L.geoJSON({ type: "FeatureCollection", features: geo.features.filter((f) => bandLevel(f.properties.i) >= VIZ.desde) }, {
     pane: "indice", renderer, interactive: false, smoothFactor: 0.4,
-    style: (f) => ({ fillColor: f.properties.c, fillOpacity: 1, color: f.properties.c, weight: 0.8, opacity: 1 }),
+    style: (f) => {
+      const a = IDX.alphas[f.properties.i];
+      return VIZ.bordes
+        ? { fillColor: f.properties.c, fillOpacity: a, color: f.properties.i >= 5 ? "#ffffff" : "#1a4e8e", weight: 1, opacity: 0.55 }
+        : { fillColor: f.properties.c, fillOpacity: a, color: f.properties.c, weight: 0.6, opacity: a };
+    },
   });
 
   // ---------- Estado ----------
   let active = false;
-  let steps = []; // {min, time, rain(Float32), coarse:{cape,gust,pp,heat}, index, layer, p90, max, source}
+  let steps = []; // {min, time, rain(Float32), coarse:{cape,gust,pp,heat,cloud}, parts, index, layer, p90, max, source}
   let cur = NOW_I;
   let t0 = null;
   let radarOK = false;
@@ -214,6 +252,7 @@
   function modelAt(model, name, tSec, lat, lng) {
     const { times, lats, lons, vars } = model;
     const arr = vars[name];
+    if (!arr) return 0;
     const ny = lats.length, nx = lons.length;
     let a = 0;
     while (a < times.length - 2 && times[a + 1] <= tSec) a++;
@@ -309,17 +348,29 @@
   const pause = () => new Promise((r) => { waiting.push(r); chan.port2.postMessage(0); });
 
   // Satélite: horas disponibles y rejillas sobre el área del índice (se piden en paralelo)
-  async function loadSat(key, hours, tolMin) {
+  async function loadSat(key, hours, tolMin, post) {
     if (!C.gibsTimes) return null;
     const times = await C.gibsTimes(key, hours);
     if (!times.length) return null;
     const grids = new Map();
     const get = (t) => {
-      if (!grids.has(t)) grids.set(t, C.gibsGrid(key, new Date(t).toISOString().slice(0, 19) + "Z", AREA, key === "imerg30" ? 8 : 4).then((g) => g.grid).catch(() => null));
+      if (!grids.has(t)) grids.set(t, C.gibsGrid(key, new Date(t).toISOString().slice(0, 19) + "Z", AREA, key === "imerg30" ? 8 : 4).then((g) => (post ? post(g.grid) : g.grid)).catch(() => null));
       return grids.get(t);
     };
     const pick = (ms) => { let b = null, bd = Infinity; times.forEach((t) => { const d = Math.abs(t - ms); if (d < bd) { bd = d; b = t; } }); return bd <= tolMin * 60000 ? b : null; };
     return { times, get, pick, last: times[times.length - 1] };
+  }
+
+  // GOES: de la temperatura de los topes (°C) salen la lluvia estimada y la nubosidad (topes fríos = nublado)
+  function goesPost(T) {
+    const rain = new Float32Array(N), cloud = new Float32Array(N);
+    for (let k = 0; k < N; k++) {
+      const t = T[k];
+      if (!Number.isFinite(t)) { rain[k] = NaN; cloud[k] = NaN; continue; }
+      rain[k] = C.goesRain(t);
+      cloud[k] = 100 * clamp((18 - t) / 33);
+    }
+    return { rain, cloud };
   }
 
   // Estaciones: la serie horaria (IMN + IMHPA) remuestreada al área del índice
@@ -375,7 +426,7 @@
     let data;
     try { data = await C.stations.load(); } catch (e) { return null; }
     const frames = [];
-    for (let m = 150; m >= 0; m -= 30) { const t = sat.pick(endMs - m * 60000); if (t) frames.push(await sat.get(t)); }
+    for (let m = 150; m >= 0; m -= 30) { const t = sat.pick(endMs - m * 60000); if (t) { const g = await sat.get(t); frames.push(g && g.rain); } }
     const ok = frames.filter(Boolean);
     if (ok.length < 4) return null;
     const [x0, y0, x1, y1] = AREA.bbox;
@@ -407,7 +458,7 @@
         loadMask(),
         fetch("/api/celeste/modelo").then((r) => { if (!r.ok) throw new Error("modelo"); return r.json(); }),
         C.stations && C.stations.serie ? C.stations.serie().catch(() => null) : null,
-        loadSat("goesrain", 7, 16).catch(() => null),
+        loadSat("goestemp", 7, 16, goesPost).catch(() => null),
         loadSat("imerg30", 12, 16).catch(() => null),
       ]);
       radarOK = !!radar;
@@ -422,7 +473,6 @@
       calibG = null;
       goesFactor = 0.5;
       const calibProm = goes ? calibrateSat(goes, t0.getTime()).catch(() => null) : Promise.resolve(null);
-      const goesF = null;
       setStatus(radarOK ? "Calculando el movimiento de la lluvia…" : "Sin radar en este momento: se combinan estaciones, satélites y modelo.");
       await pause();
 
@@ -497,7 +547,7 @@
         let goesG = null, goesQ = 0;
         if (goes) {
           if (L <= 0) { const t = goes.pick(ms); if (t) { goesG = await goes.get(t); goesQ = 1; } }
-          else if (goesLast && L <= 120) { goesG = shift(goesLast, mvx * (L + goesLastAge), mvy * (L + goesLastAge)); goesQ = clamp(1 - L / 120); }
+          else if (goesLast && L <= 120) { const dx = mvx * (L + goesLastAge), dy = mvy * (L + goesLastAge); goesG = { rain: shift(goesLast.rain, dx, dy), cloud: shift(goesLast.cloud, dx, dy) }; goesQ = clamp(1 - L / 120); }
           if (goesG) used.goes++;
         }
         // IMERG: solo donde hay imagen de esa hora (llega con unas 5 h de retraso)
@@ -505,13 +555,14 @@
         if (imerg && L <= 0) { const t = imerg.pick(ms); if (t) { imergG = await imerg.get(t); if (imergG) used.imerg++; } }
 
         const st = {
-          min: L, time: new Date(ms),
-          parts: { rr: rr16, wTime, est: estPart, goes: goesG, goesQ, goesF, imerg: imergG, mrC: modelCoarse(model, "precipitation", tSec + 1800, true) },
+          si, min: L, time: new Date(ms),
+          parts: { rr: rr16, wTime, est: estPart, goes: goesG && goesG.rain, cloudG: goesG && goesG.cloud, goesQ, imerg: imergG, mrC: modelCoarse(model, "precipitation", tSec + 1800, true) },
           coarse: {
             cape: modelCoarse(model, "cape", tSec, true),
             gust: modelCoarse(model, "wind_gusts_10m", tSec + 1800, true),
             pp: modelCoarse(model, "precipitation_probability", tSec + 1800, true),
             heat: modelCoarse(model, "apparent_temperature", tSec, false),
+            cloud: modelCoarse(model, "cloud_cover", tSec, true),
           },
           source: !radarField || wTime === 0 ? "modelo" : L < 0 ? "observado" : L === 0 ? "ahora" : "proyectado",
         };
@@ -525,9 +576,11 @@
       calibG = await calibProm;
       if (calibG && calibG.used) {
         goesFactor = calibG.factor;
-        steps.forEach((s) => { if (s && s.parts.goes) { combineRain(s); computeIndex(s); } });
-        drawBars(); show(cur);
+        steps.forEach((s) => { if (s && s.parts.goes) combineRain(s); });
       }
+      // Con todos los pasos listos se puede evaluar la persistencia (Temporal) y recalcular
+      steps.forEach((s) => s && computeIndex(s));
+      drawBars(); show(cur);
       computedAt = Date.now();
       const motionTxt = motion ? ` La lluvia se desplaza hacia ${direction(motion.meanX, motion.meanY)} a unos ${C.fmtNum.format(speedKmh(motion.meanX, motion.meanY))} km/h.` : "";
       const mos = radar && radar.mosaic;
@@ -542,6 +595,7 @@
       sourcesUsed = used;
       setStatus(`Lluvia combinada de ${parts.join(", ")}.${radarOK ? ` Radar de las ${C.fmtHour.format(t0)}`.replace(/\.?$/, ".") : ""}${motionTxt}${calibTxt}${mosTxt}`);
       renderWeights();
+      checkAlerts();
       $("#idxTimeline").hidden = !active;
     } catch (err) {
       console.error("indice", err);
@@ -562,18 +616,19 @@
   }
 
   function computeIndex(st) {
-    const wsum = COMPS.reduce((s, c) => s + c.w, 0) || 1;
     const full = {};
     MODEL_KEYS.forEach((k) => (full[k] = C.resample(st.coarse[k], CWd, CHd, W, H)));
-    const w = Object.fromEntries(COMPS.map((c) => [c.key, c.w]));
-    const sc = Object.fromEntries(COMPS.map((c) => [c.key, c.score]));
+    const P = st.parts || {};
+    const nb = [-2, -1, 1, 2].map((d) => steps[st.si + d]).filter((x) => x && x.rain);
     const idx = new Float32Array(N);
     for (let k = 0; k < N; k++) {
       if (mask && !mask[k]) { idx[k] = NaN; continue; }
-      let s = 0;
-      if (w.rain) s += w.rain * sc.rain(st.rain[k]);
-      for (const key of MODEL_KEYS) if (w[key]) s += w[key] * sc[key](full[key][k]);
-      idx[k] = (100 * s) / wsum;
+      const R = st.rain[k];
+      let persist = 0;
+      if (R >= 7.6 && nb.length) { let sm = R; nb.forEach((x) => (sm += x.rain[k])); persist = sm / (nb.length + 1); }
+      let cloud = full.cloud[k];
+      if (P.cloudG) { const g = P.cloudG[k]; if (Number.isFinite(g)) { const q = 0.75 * P.goesQ; cloud = q * g + (1 - q) * cloud; } }
+      idx[k] = ladder(R, cloud, full.pp[k], full.cape[k], full.gust[k], persist);
     }
     st.index = idx;
     const sample = [];
@@ -585,6 +640,15 @@
     if (st.layer) map.removeLayer(st.layer);
     st.layer = null;
     if (wasShown && active && steps[cur] === st) ensureLayer(st).addTo(map);
+  }
+
+  // Valores de una celda en un paso (para la ficha)
+  function cellInfo(st, k, ck) {
+    const P = st.parts || {};
+    const m = (key) => st.coarse[key][ck];
+    let cloud = m("cloud");
+    if (P.cloudG && Number.isFinite(P.cloudG[k])) { const q = 0.75 * P.goesQ; cloud = q * P.cloudG[k] + (1 - q) * cloud; }
+    return { R: st.rain[k], cloud, pp: m("pp"), cape: m("cape"), gust: m("gust"), heat: m("heat"), v: st.index[k] };
   }
 
   function ensureLayer(st) {
@@ -630,17 +694,18 @@
   const bars = $("#idxBars");
   const btnPlay = $("#idxPlay");
 
-  const fmtLead = (min) => {
-    if (min === 0) return "Ahora";
-    const h = Math.abs(min) / 60;
-    const txt = Number.isInteger(h) ? String(h) : h.toFixed(1).replace(".", ",");
-    return `${min < 0 ? "−" : "+"}${txt} h`;
+  const leadWords = (min) => { const m = Math.abs(min); return m < 60 ? `${m} min` : `${Number.isInteger(m / 60) ? m / 60 : (m / 60).toFixed(1).replace(".", ",")} h`; };
+  const fmtLead = (min) => (min === 0 ? "Ahora" : `${min < 0 ? "−" : "+"}${leadWords(min)}`);
+  const whenText = (st) => {
+    const h = C.fmtHour.format(st.time);
+    if (st.min === 0) return `Ahora · ${h}`;
+    return st.min < 0 ? `Hace ${leadWords(st.min)} · ${h} · observado` : `Dentro de ${leadWords(st.min)} · ${h} · pronóstico`;
   };
   const sourceText = (st) => ({
-    observado: "observado: radar calibrado y modelo",
-    ahora: radarOK ? `radar ${C.ago(st.time)}` : "modelo",
-    proyectado: "pronóstico: radar proyectado y modelo",
-    modelo: st.min < 0 ? "observado: modelo (sin radar)" : "pronóstico: modelo",
+    observado: "observado: radar, estaciones y satélites",
+    ahora: radarOK ? `radar de ${C.ago(st.time)}, estaciones y satélites` : "estaciones, satélites y modelo",
+    proyectado: "pronóstico: radar proyectado, estaciones y modelo",
+    modelo: st.min < 0 ? "observado: estaciones, satélites y modelo" : "pronóstico: estaciones corregidas y modelo",
   })[st.source];
 
   function drawBars() {
@@ -650,9 +715,10 @@
       const b = document.createElement("span");
       b.className = "tl-bar" + (st ? "" : " loading") + (i === cur ? " current" : "") + (m < 0 ? " past" : "") + (m === 0 ? " now" : "");
       if (st) {
-        b.style.height = `${6 + 28 * clamp(st.p90 / 80)}px`;
-        b.style.background = i === cur ? "" : C.bandColor(IDX, st.p90);
-        b.title = `${fmtLead(st.min)}, ${C.fmtHour.format(st.time)}: el 10 % del país supera ${C.fmtNum.format(st.p90)}; máximo ${C.fmtNum.format(st.max)}`;
+        const l = levelOf(st.p90);
+        b.style.height = `${6 + 28 * clamp(st.p90 / 90)}px`;
+        b.style.background = i === cur ? "" : levelColor(l);
+        b.title = `${fmtLead(st.min)}, ${C.fmtHour.format(st.time)}: el 10 % del país llega a ${LEVELS[l].n} o más`;
       } else b.style.height = "4px";
       bars.appendChild(b);
     });
@@ -673,12 +739,13 @@
     if (prev && prev !== st && prev.layer) map.removeLayer(prev.layer);
     [...bars.children].forEach((b, j) => {
       b.classList.toggle("current", j === cur);
-      if (steps[j]) b.style.background = j === cur ? "" : C.bandColor(IDX, steps[j].p90);
+      if (steps[j]) b.style.background = j === cur ? "" : levelColor(levelOf(steps[j].p90));
     });
-    $("#idxTime").textContent = `${fmtLead(st.min)} · ${C.fmtHour.format(st.time)}`;
+    $("#idxTime").textContent = whenText(st).split(" · ").slice(0, 2).join(" · ");
     $("#idxAgo").textContent = sourceText(st);
     bars.setAttribute("aria-valuenow", String(cur));
-    bars.setAttribute("aria-valuetext", `${fmtLead(st.min)}, ${C.fmtHour.format(st.time)}`);
+    bars.setAttribute("aria-valuetext", whenText(st));
+    updateClouds(st);
   }
 
   function play() {
@@ -688,7 +755,7 @@
     const step = () => {
       const next = cur >= STEPS.length - 1 ? 0 : cur + 1;
       show(next);
-      timer = setTimeout(step, next === STEPS.length - 1 ? 1800 : next === NOW_I ? 1200 : 600);
+      timer = setTimeout(step, next === STEPS.length - 1 ? 1800 : next === NOW_I ? 1200 : 650);
     };
     timer = setTimeout(step, 200);
   }
@@ -710,70 +777,236 @@
     if (e.key === " ") { timer ? stop() : play(); e.preventDefault(); }
   });
 
+  // ---------- Nubes reales debajo del índice (GOES-Este en color, a la hora de cada paso) ----------
+  map.createPane("idxnubes").style.zIndex = 425;
+  map.getPane("idxnubes").style.pointerEvents = "none";
+  let cloudTimes = null;
+  const cloudLayers = new Map();
+  async function updateClouds(st) {
+    const on = active && VIZ.nubes && st;
+    if (!on) { cloudLayers.forEach((l) => l.setOpacity(0)); return; }
+    if (!cloudTimes) { try { cloudTimes = await C.gibsTimes("geocolor", 8); } catch (e) { cloudTimes = []; } }
+    if (!cloudTimes.length) return;
+    const ms = st.time.getTime() + 5 * 60000;
+    let t = cloudTimes[0];
+    cloudTimes.forEach((x) => { if (x <= ms) t = x; });
+    const iso = new Date(t).toISOString().slice(0, 19) + "Z";
+    let lyr = cloudLayers.get(iso);
+    if (!lyr) {
+      lyr = L.tileLayer(`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/GOES-East_ABI_GeoColor/default/${iso}/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png`, { pane: "idxnubes", maxNativeZoom: 7, maxZoom: 16, opacity: 0, className: "imagen-suave", errorTileUrl: "data:image/gif;base64,R0lGODlhAQABAAAAACw=" }).addTo(map);
+      cloudLayers.set(iso, lyr);
+      if (cloudLayers.size > 8) { const k0 = cloudLayers.keys().next().value; map.removeLayer(cloudLayers.get(k0)); cloudLayers.delete(k0); }
+    }
+    if (!(active && VIZ.nubes) || steps[cur] !== st) return;
+    cloudLayers.forEach((l, k) => l.setOpacity(k === iso ? 0.8 : 0));
+  }
+
   // ---------- Panel ----------
   function setStatus(t) { const el = $("#idxStatus"); if (el) el.textContent = t; }
 
+  function renderLegend() {
+    $("#idxLegend").innerHTML = `
+      <div class="lvl-scale" aria-hidden="true">${LEVELS.map((L, l) => `<span style="background:${l === 0 ? "transparent" : levelColor(l)};opacity:${l === 0 ? 1 : IDX.alphas[l === 1 ? 1 : l]}" class="${l === 0 ? "transp" : ""}"></span>`).join("")}</div>
+      <details class="lvl-box" open><summary>Qué significa cada peldaño</summary>
+        <ul class="lvl-list">${LEVELS.map((L, l) => `<li title="${L.rule}">${levelBadge(l)}<span class="lvl-n">${l}</span><span><b>${L.n}</b><span class="muted">${L.d}</span></span></li>`).join("")}</ul>
+        <p class="w-note">"Pura vida" no se colorea: deja ver el terreno y las nubes. Pasa el cursor sobre un peldaño para ver su regla.</p>
+      </details>`;
+  }
+
+  function renderViz() {
+    $("#idxViz").innerHTML = `
+      <details class="idx-box" open><summary>Visualización</summary>
+        <div class="opacity"><span>Opacidad</span><input type="range" id="vizOp" min="0.3" max="1" step="0.05" value="${VIZ.op}" aria-label="Opacidad del índice"></div>
+        <label class="viz-row">Mostrar desde
+          <select id="vizDesde">${[1, 2, 3, 4, 5, 6].map((l) => `<option value="${l}"${VIZ.desde === l ? " selected" : ""}>${LEVELS[l].n}</option>`).join("")}</select>
+        </label>
+        <label class="viz-check"><input type="checkbox" id="vizBordes"${VIZ.bordes ? " checked" : ""}> Bordes entre peldaños</label>
+        <label class="viz-check"><input type="checkbox" id="vizNubes"${VIZ.nubes ? " checked" : ""}> Nubes reales del satélite debajo (GOES-Este)</label>
+      </details>`;
+  }
+  const saveViz = () => store.set("celeste-viz", JSON.stringify(VIZ));
+  function redrawLayers() {
+    steps.forEach((s) => { if (s && s.layer) { map.removeLayer(s.layer); s.layer = null; } });
+    show(cur);
+  }
+  document.addEventListener("input", (e) => {
+    if (e.target.id === "vizOp") { VIZ.op = parseFloat(e.target.value); map.getPane("indice").style.opacity = VIZ.op; saveViz(); }
+  });
+  document.addEventListener("change", (e) => {
+    const id = e.target.id;
+    if (id === "vizDesde") { VIZ.desde = parseInt(e.target.value, 10); saveViz(); redrawLayers(); }
+    if (id === "vizBordes") { VIZ.bordes = e.target.checked; saveViz(); redrawLayers(); }
+    if (id === "vizNubes") { VIZ.nubes = e.target.checked; saveViz(); updateClouds(steps[cur]); }
+    if (id === "alertOn" || id === "alertLvl") {
+      ALERT.on = $("#alertOn").checked;
+      ALERT.lvl = parseInt($("#alertLvl").value, 10);
+      store.set("celeste-aviso", JSON.stringify(ALERT));
+      if (ALERT.on && "Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
+      scheduleRefresh();
+      checkAlerts(true);
+    }
+  });
+
   function renderWeights() {
     const wrap = $("#idxWeights");
-    const total = COMPS.reduce((s, c) => s + c.w, 0) || 1;
     const totalS = RSRC.reduce((s, c) => s + c.w, 0) || 1;
     const avail = (k) => !sourcesUsed || k === "model" || (k === "radar" ? sourcesUsed.radar : k === "est" ? sourcesUsed.est : sourcesUsed[k] > 0);
-    wrap.innerHTML = `<p class="w-title">Fuentes de la lluvia</p><p class="w-note">En cada punto se promedian las fuentes que tienen dato ahí, con estos pesos.</p>` + RSRC.map((c) => `
+    wrap.innerHTML = `<p class="w-note">La lluvia de cada punto es un promedio de las fuentes que tienen dato ahí, con estos pesos. Los peldaños se definen con esa lluvia, la nubosidad, la probabilidad de lluvia, el potencial de tormenta y las ráfagas.</p>` + RSRC.map((c) => `
       <div class="weight${avail(c.key) ? "" : " sin-dato"}">
         <label for="ws-${c.key}">${c.src && C.SOURCES && C.SOURCES[c.src] ? `<span class="w-chip">${C.SOURCES[c.src].name}</span>` : ""}${c.name}${avail(c.key) ? "" : " <em>(sin dato ahora)</em>"}</label>
         <input id="ws-${c.key}" type="range" min="0" max="100" step="2" value="${c.w}" data-src="${c.key}">
         <output for="ws-${c.key}">${C.fmtNum.format((c.w / totalS) * 100)} %</output>
-      </div>`).join("") + `<p class="w-title">Componentes del índice</p>` + COMPS.map((c) => `
-      <div class="weight">
-        <label for="w-${c.key}">${c.name}</label>
-        <input id="w-${c.key}" type="range" min="0" max="100" step="5" value="${c.w}" data-key="${c.key}">
-        <output for="w-${c.key}">${C.fmtNum.format((c.w / total) * 100)} %</output>
       </div>`).join("") + `<button type="button" class="link-btn" id="idxReset">Volver a los pesos sugeridos</button>`;
-  }
-  let reweightTimer = null;
-  function reweight() {
-    clearTimeout(reweightTimer);
-    reweightTimer = setTimeout(() => {
-      steps.forEach((s) => s && computeIndex(s));
-      drawBars();
-      show(cur);
-      store.set("celeste-pesos", JSON.stringify(Object.fromEntries(COMPS.map((c) => [c.key, c.w]))));
-    }, 250);
   }
   let resourceTimer = null;
   document.addEventListener("input", (e) => {
     const es = e.target.closest("#idxWeights input[data-src]");
-    if (es) {
-      RSRC.find((c) => c.key === es.dataset.src).w = parseInt(es.value, 10);
-      const totalS = RSRC.reduce((s, c) => s + c.w, 0) || 1;
-      document.querySelectorAll("#idxWeights input[data-src]").forEach((inp) => { inp.nextElementSibling.textContent = `${C.fmtNum.format((RSRC.find((c) => c.key === inp.dataset.src).w / totalS) * 100)} %`; });
-      clearTimeout(resourceTimer);
-      resourceTimer = setTimeout(() => {
-        steps.forEach((s) => { if (s) { combineRain(s); computeIndex(s); } });
-        drawBars(); show(cur);
-        store.set("celeste-fuentes", JSON.stringify(RW()));
-      }, 300);
-      return;
-    }
-    const el = e.target.closest("#idxWeights input[data-key]");
-    if (!el) return;
-    COMPS.find((c) => c.key === el.dataset.key).w = parseInt(el.value, 10);
-    const total = COMPS.reduce((s, c) => s + c.w, 0) || 1;
-    document.querySelectorAll("#idxWeights input[data-key]").forEach((inp) => { inp.nextElementSibling.textContent = `${C.fmtNum.format((COMPS.find((c) => c.key === inp.dataset.key).w / total) * 100)} %`; });
-    reweight();
+    if (!es) return;
+    RSRC.find((c) => c.key === es.dataset.src).w = parseInt(es.value, 10);
+    const totalS = RSRC.reduce((s, c) => s + c.w, 0) || 1;
+    document.querySelectorAll("#idxWeights input[data-src]").forEach((inp) => { inp.nextElementSibling.textContent = `${C.fmtNum.format((RSRC.find((c) => c.key === inp.dataset.src).w / totalS) * 100)} %`; });
+    clearTimeout(resourceTimer);
+    resourceTimer = setTimeout(() => {
+      steps.forEach((s) => s && combineRain(s));
+      steps.forEach((s) => s && computeIndex(s));
+      drawBars(); show(cur); renderLoc();
+      store.set("celeste-fuentes", JSON.stringify(RW()));
+    }, 300);
   });
   document.addEventListener("click", (e) => {
     if (!e.target.closest("#idxReset")) return;
-    COMPS.forEach((c) => (c.w = SUGGESTED[c.key]));
     RSRC.forEach((c) => (c.w = SUGGESTED_SRC[c.key]));
     store.set("celeste-fuentes", JSON.stringify(RW()));
     renderWeights();
     steps.forEach((s) => s && combineRain(s));
-    reweight();
+    steps.forEach((s) => s && computeIndex(s));
+    drawBars(); show(cur); renderLoc();
   });
 
-  $("#idxLegend").innerHTML = C.legendHTML(IDX);
+  // ---------- Celdas y resúmenes por punto ----------
+  function cellOf(lat, lng) {
+    const [X, Y] = C.merc(lat, lng);
+    const [x0, y0, x1, y1] = AREA.bbox;
+    const i = Math.floor(((X - x0) / (x1 - x0)) * W), j = Math.floor(((y1 - Y) / (y1 - y0)) * H);
+    if (i < 0 || j < 0 || i >= W || j >= H) return null;
+    return { i, j, k: j * W + i, ck: Math.min(CHd - 1, Math.floor(j / 3)) * CWd + Math.min(CWd - 1, Math.floor(i / 3)) };
+  }
+  // Peldaño más alto, lluvia esperada y probabilidad de lluvia en una ventana de pasos.
+  // Probabilidad: 60 % "de vecindario" (qué parte de los 10 km alrededor recibe lluvia en la ventana, según
+  // radar, estaciones y satélite combinados) + 40 % probabilidad del modelo.
+  function outlook(c, a, b) {
+    let maxL = 0, at = null, mm = 0, ppMax = 0, n = 0;
+    for (let i = a; i <= b; i++) {
+      const st = steps[i];
+      if (!st) continue;
+      n++;
+      const l = levelOf(st.index[c.k]);
+      if (!at || l > maxL) { maxL = l; at = st; }
+      mm += Math.max(0, st.rain[c.k]) * 0.5;
+      ppMax = Math.max(ppMax, st.coarse.pp[c.ck] || 0);
+    }
+    if (!n) return null;
+    let wet = 0, tot = 0;
+    for (let dj = -8; dj <= 8; dj += 2) for (let di = -8; di <= 8; di += 2) {
+      if (di * di + dj * dj > 64) continue;
+      const ii = c.i + di, jj = c.j + dj;
+      if (ii < 0 || jj < 0 || ii >= W || jj >= H) continue;
+      const q = jj * W + ii;
+      tot++;
+      for (let i = a; i <= b; i++) { const st = steps[i]; if (st && st.rain[q] >= 0.2) { wet++; break; } }
+    }
+    const neigh = tot ? (100 * wet) / tot : 0;
+    return { maxL, at, mm, pp: Math.round(0.6 * neigh + 0.4 * ppMax), neigh: Math.round(neigh), ppModel: Math.round(ppMax) };
+  }
+  function confidence(c) {
+    const st = steps[NOW_I];
+    if (!st || !st.parts) return null;
+    const qr = st.parts.rr ? radW[c.k] * st.parts.wTime : 0;
+    const qe = st.parts.est && st.parts.est.q ? st.parts.est.q[c.k] / 255 : 0;
+    if (qr >= 0.5 && qe >= 0.3) return ["alta", "hay radar y estaciones cerca"];
+    if (qr >= 0.5) return ["media", "hay radar, pero pocas estaciones cerca"];
+    if (qe >= 0.3) return ["media", "hay estaciones cerca, pero el radar no llega"];
+    return ["baja", "solo satélite y modelo; no hay radar ni estaciones cerca"];
+  }
+
+  // ---------- Tu ubicación y avisos ----------
+  let userLoc = (() => { try { const u = JSON.parse(store.get("celeste-ubicacion") || "null"); return u && Date.now() - u.t < 7 * 86400000 ? u : null; } catch (e) { return null; } })();
+  let userPlace = null;
+  const ALERT = Object.assign({ on: false, lvl: 5 }, (() => { try { return JSON.parse(store.get("celeste-aviso") || "{}"); } catch (e) { return {}; } })());
+  let alertMsg = "";
+
+  function renderLoc() {
+    const el = $("#idxLoc");
+    if (!el) return;
+    if (!userLoc) {
+      el.innerHTML = `<button type="button" class="loc-cta" id="idxLocBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><circle cx="12" cy="12" r="7.5"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/></svg><span><b>Usar mi ubicación</b><span>Para ver el pronóstico donde estás y recibir avisos</span></span></button>`;
+      return;
+    }
+    const c = cellOf(userLoc.lat, userLoc.lng);
+    const place = userPlace && userPlace.nombre ? userPlace.nombre : "Tu ubicación";
+    let body = `<p class="w-note">Calculando…</p>`;
+    if (c && steps[NOW_I]) {
+      const l = levelOf(steps[NOW_I].index[c.k]);
+      const o = outlook(c, NOW_I + 1, NOW_I + 12);
+      body = `<div class="loc-now">${levelBadge(l, "big")}<div><span class="loc-name">${place}</span><b>Ahora: ${LEVELS[l].n}</b><span class="muted">${LEVELS[l].d}</span></div></div>
+        ${o ? `<p class="loc-next">Próximas 6 h: hasta <b>${LEVELS[o.maxL].n}</b>${o.maxL > l ? ` hacia las ${C.fmtHour.format(o.at.time)}` : ""} · lluvia ${o.pp} % · ${C.fmtNum1.format(o.mm)} mm esperados.</p>` : ""}`;
+    } else if (!c) body = `<p class="w-note">${place} está fuera del área del índice (Costa Rica).</p>`;
+    el.innerHTML = `<div class="loc-card${alertMsg ? " alerta" : ""}">${body}
+      ${alertMsg ? `<p class="loc-alert">${alertMsg}</p>` : ""}
+      <div class="loc-actions"><button type="button" data-loc="ficha">Ver ficha</button><button type="button" data-loc="upd">Actualizar ubicación</button></div>
+      <label class="viz-check alert-row"><input type="checkbox" id="alertOn"${ALERT.on ? " checked" : ""}> Avisarme si llega a
+        <select id="alertLvl">${[3, 4, 5, 6, 7, 8, 9].map((x) => `<option value="${x}"${ALERT.lvl === x ? " selected" : ""}>${LEVELS[x].n}</option>`).join("")}</select></label>
+      <p class="w-note">Los avisos llegan mientras Celeste esté abierto en este navegador (aunque sea en otra pestaña).</p>
+    </div>`;
+  }
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("#idxLocBtn")) { C.locate({ open: false, noPan: false }); return; }
+    const b = e.target.closest("[data-loc]");
+    if (!b || !userLoc) return;
+    if (b.dataset.loc === "ficha") { map.setView([userLoc.lat, userLoc.lng], Math.max(map.getZoom(), 11)); map.fire("click", { latlng: L.latLng(userLoc.lat, userLoc.lng) }); }
+    if (b.dataset.loc === "upd") C.locate({ noPan: false });
+  });
+  C.onLocation((lat, lng) => {
+    userLoc = { lat, lng, t: Date.now() };
+    userPlace = null;
+    C.placeName(lat, lng).then((p) => { userPlace = p; renderLoc(); });
+    renderLoc();
+    checkAlerts();
+  });
+  if (userLoc) C.placeName(userLoc.lat, userLoc.lng).then((p) => { userPlace = p; renderLoc(); });
+
+  function checkAlerts(fromUser) {
+    alertMsg = "";
+    if (!ALERT.on || !userLoc || !steps[NOW_I]) { renderLoc(); return; }
+    const c = cellOf(userLoc.lat, userLoc.lng);
+    if (!c) { renderLoc(); return; }
+    let hit = null;
+    for (let i = NOW_I; i < STEPS.length; i++) { const st = steps[i]; if (st && levelOf(st.index[c.k]) >= ALERT.lvl) { hit = st; break; } }
+    if (hit) {
+      const l = levelOf(hit.index[c.k]);
+      const when = hit.min === 0 ? "ahora" : `hacia las ${C.fmtHour.format(hit.time)} (dentro de ${leadWords(hit.min)})`;
+      alertMsg = `Aviso: se espera ${LEVELS[l].n} en ${userPlace && userPlace.nombre ? userPlace.nombre : "tu ubicación"} ${when}.`;
+      const key = `${ALERT.lvl}|${Math.round(hit.time.getTime() / 3600000)}`;
+      if (store.get("celeste-aviso-ultimo") !== key) {
+        store.set("celeste-aviso-ultimo", key);
+        C.toast(alertMsg, 10000);
+        if ("Notification" in window && Notification.permission === "granted") {
+          try { new Notification("Celeste · " + LEVELS[l].n, { body: alertMsg.replace(/^Aviso: /, ""), icon: "/favicon.svg", tag: "celeste-aviso" }); } catch (e) { /* sin notificaciones */ }
+        }
+      }
+    } else if (fromUser) C.toast(`Listo: te avisaremos si tu ubicación llega a ${LEVELS[ALERT.lvl].n} en las próximas 6 horas.`);
+    renderLoc();
+  }
+
+  function scheduleRefresh() {
+    clearInterval(refresh);
+    if (active || ALERT.on) refresh = setInterval(() => { if (active || ALERT.on) run(); }, 10 * 60000);
+  }
+
+  renderLegend();
+  renderViz();
   renderWeights();
+  renderLoc();
 
   // ---------- Activar / desactivar ----------
   function setActive(on) {
@@ -785,58 +1018,65 @@
     if (on) {
       if (!steps[NOW_I] || Date.now() - computedAt > 10 * 60000) run();
       else show(cur);
-      clearInterval(refresh);
-      refresh = setInterval(() => { if (active) run(); }, 10 * 60000);
+      // Pide la ubicación (el navegador pregunta solo la primera vez)
+      C.locate({ silent: true, noPan: true });
     } else {
       stop();
-      clearInterval(refresh);
       steps.forEach((s) => s && s.layer && map.removeLayer(s.layer));
+      updateClouds(null);
     }
+    scheduleRefresh();
   }
   document.querySelectorAll("[data-indice-btn]").forEach((b) => b.addEventListener("click", () => {
     setActive(!active);
     if (active && window.innerWidth < 820) $("#panel").classList.add("open");
   }));
+  // Con avisos activos, el índice se calcula en segundo plano aunque no esté a la vista
+  if (ALERT.on && userLoc) { setTimeout(() => { if (!computing && !steps[NOW_I]) run(); }, 15000); scheduleRefresh(); }
 
-  // ---------- Al tocar un punto ----------
+  // ---------- Al tocar un punto: ficha del lugar ----------
+  const capeWord = (v) => (v >= 2500 ? "muy alto" : v >= 1500 ? "alto" : v >= 700 ? "moderado" : "bajo");
   C.pointHooks.push((lat, lng) => {
     if (!active || !steps[NOW_I]) return "";
-    const [X, Y] = C.merc(lat, lng);
-    const [x0, y0, x1, y1] = AREA.bbox;
-    const i = Math.floor(((X - x0) / (x1 - x0)) * W), j = Math.floor(((y1 - Y) / (y1 - y0)) * H);
-    if (i < 0 || j < 0 || i >= W || j >= H) return `<h3>Índice CELESTE</h3><p class="muted">Este punto está fuera del área del índice.</p>`;
-    const k = j * W + i;
+    const c = cellOf(lat, lng);
+    if (!c) return `<h3>Índice CELESTE</h3><p class="muted">Este punto está fuera del área del índice.</p>`;
     const st = steps[cur];
-    const v = st.index[k];
+    const v = st.index[c.k];
     if (!Number.isFinite(v)) return `<h3>Índice CELESTE</h3><p class="muted">El índice se calcula sobre Costa Rica y su franja costera. Toca un punto dentro del país.</p>`;
-    const ck = Math.min(CHd - 1, Math.floor(j / 3)) * CWd + Math.min(CWd - 1, Math.floor(i / 3));
-    const wsum = COMPS.reduce((s, c) => s + c.w, 0) || 1;
-    const series = steps.map((s) => (s && Number.isFinite(s.index[k]) ? s.index[k] : null));
-    let peak = NOW_I;
-    for (let q = NOW_I; q < series.length; q++) if (series[q] != null && series[q] > series[peak]) peak = q;
-    const raw = (c) => (c.key === "rain" ? st.rain[k] : st.coarse[c.key][ck]);
-    const parts = COMPS.map((c) => ({ c, raw: raw(c), pts: (100 * c.w * c.score(raw(c))) / wsum }));
-    const maxPts = Math.max(1, ...parts.map((p) => p.pts));
-    const past = series.slice(0, NOW_I).filter((x) => x != null);
-    const pastMax = past.length ? Math.max(...past) : null;
+    const l = levelOf(v);
+    const inf = cellInfo(st, c.k, c.ck);
+    const series = steps.map((s) => (s && Number.isFinite(s.index[c.k]) ? s.index[c.k] : null));
+    const wins = [["Próxima hora", 1, 2], ["Próximas 3 h", 1, 6], ["Próximas 6 h", 1, 12]].map(([n, a, b]) => [n, outlook(c, NOW_I + a, NOW_I + b)]);
+    const past = outlook(c, 0, NOW_I);
+    const conf = confidence(c);
+    const facts = [
+      ["Lluvia estimada", inf.R >= 0.05 ? `${C.fmtNum1.format(inf.R)} mm/h` : "Sin lluvia"],
+      ["Nubosidad", `${C.fmtNum.format(inf.cloud)} %`],
+      ["Probabilidad de lluvia (modelo)", `${C.fmtNum.format(inf.pp)} %`],
+      ["Potencial de tormenta", `${capeWord(inf.cape)} (${C.fmtNum.format(inf.cape)} J/kg)`],
+      ["Ráfagas", `${C.fmtNum.format(inf.gust)} km/h`],
+      ["Sensación térmica", `${C.fmtNum.format(inf.heat)} °C`],
+    ];
     return `
-      <h3>Índice CELESTE · ${fmtLead(st.min).toLowerCase()}, ${C.fmtHour.format(st.time)}</h3>
-      <div class="idx-now">
-        <span class="idx-badge" style="background:${C.bandColor(IDX, v)};color:${inkOn(v)}">${C.fmtNum.format(v)}</span>
-        <div><b>${className(v)}</b><span class="muted">${pastMax != null ? `Máximo de las últimas 6 horas: ${C.fmtNum.format(pastMax)}. ` : ""}Próximas 6 horas: hasta ${C.fmtNum.format(series[peak])} a las ${C.fmtHour.format(steps[peak].time)}</span></div>
+      <div class="lvl-card" style="--lvl:${levelColor(l)}">
+        ${levelBadge(l, "big")}
+        <div class="lvl-txt"><span class="lvl-when">${whenText(st)}</span><b>${LEVELS[l].n}</b><span>${LEVELS[l].d}</span></div>
+        <span class="lvl-num" title="Índice CELESTE, de 0 a 100">${C.fmtNum.format(v)}<small>de 100</small></span>
       </div>
-      <p class="chart-title">Últimas 6 horas y próximas 6</p>
+      <p class="chart-title">Qué esperar desde ahora</p>
+      <div class="fc-grid">${wins.map(([n, o]) => o ? `
+        <div class="fc-cell">${levelBadge(o.maxL, "sm")}<span class="fc-lbl">${n}</span><b>${LEVELS[o.maxL].n}</b>
+          <span><span class="fc-k">Lluvia</span> ${o.pp} %</span><span><span class="fc-k">Total</span> ${C.fmtNum1.format(o.mm)} mm</span></div>` : "").join("")}</div>
+      <p class="fc-note">Peldaño más alto esperado, probabilidad de que llueva en ese lapso y lluvia acumulada esperada.${past ? ` En las últimas 6 horas: hasta ${LEVELS[past.maxL].n}, ${C.fmtNum1.format(past.mm)} mm.` : ""}</p>
+      <p class="chart-title">Peldaño cada media hora</p>
       ${seriesChart(series)}
-      <p class="chart-title">Qué pesa en este momento</p>
-      <div class="parts">${parts.map((p) => `
-        <div class="part">
-          <span class="part-name">${p.c.name}<br><span class="muted">${p.c.fmt.format(p.raw)} ${p.c.unit}</span></span>
-          <span class="part-bar"><span style="width:${(p.pts / maxPts) * 100}%"></span></span>
-          <b>+${C.fmtNum.format(p.pts)}</b>
-        </div>`).join("")}</div>
+      <p class="chart-title">Por qué ${LEVELS[l].n.toLowerCase()}</p>
+      <table class="pop-vals facts">${facts.map(([a, b]) => `<tr><td>${a}</td><td><b>${b}</b></td></tr>`).join("")}</table>
+      <p class="fc-note">Regla: ${LEVELS[l].rule}</p>
       <p class="chart-title">De dónde sale la lluvia aquí</p>
-      ${rainSourcesHTML(st, k, ck)}
-      <p class="source">Es una estimación automática; para avisos oficiales consulta al IMN y a la CNE.</p>`;
+      ${rainSourcesHTML(st, c.k, c.ck)}
+      ${conf ? `<p class="conf conf-${conf[0]}">Confianza ${conf[0]}: ${conf[1]}.</p>` : ""}
+      <p class="source">Estimación automática y experimental. Para avisos oficiales consulta al IMN y a la CNE.</p>`;
   });
 
   function rainSourcesHTML(st, k, ck) {
@@ -845,7 +1085,7 @@
     const mrv = P.mrC[ck];
     const rows = [];
     if (P.rr && radW[k] * P.wTime > 0) rows.push(["Radar COCESNA" + (st.min > 0 ? " (proyectado)" : ""), w.radar * radW[k] * P.wTime, P.rr[k] / 100]);
-    if (P.est && P.est.q && P.est.q[k] > 0 && Number.isFinite(P.est.grid[k])) rows.push(["Estaciones ±6 h" + (st.min > 0 ? " (pronóstico)" : ""), w.est * (P.est.q[k] / 255) * P.est.decay, P.est.grid[k]]);
+    if (P.est && P.est.q && P.est.q[k] > 0 && Number.isFinite(P.est.grid[k])) rows.push(["Estaciones IMN e IMHPA" + (st.min > 0 ? " (pronóstico)" : ""), w.est * (P.est.q[k] / 255) * P.est.decay, P.est.grid[k]]);
     if (P.goes && Number.isFinite(P.goes[k])) rows.push(["GOES-Este" + (st.min > 0 ? " (desplazado)" : ""), w.goes * P.goesQ, P.goes[k] * goesFactor]);
     if (P.imerg && Number.isFinite(P.imerg[k])) rows.push(["IMERG", w.imerg, P.imerg[k]]);
     rows.push(["Modelo numérico", w.model, mrv]);
@@ -853,26 +1093,27 @@
     return `<div class="parts">${rows.filter((r) => r[1] > 0).map(([n, wt, v]) => `
       <div class="part"><span class="part-name">${n}<br><span class="muted">${C.fmtNum1.format(v)} mm/h</span></span>
       <span class="part-bar"><span style="width:${(wt / tot) * 100}%"></span></span><b>${C.fmtNum.format((wt / tot) * 100)} %</b></div>`).join("")}</div>
-      <p class="source">Lluvia combinada en este punto: <b>${C.fmtNum1.format(st.rain[k])} mm/h</b>. Cada fuente pesa según su peso general y su calidad aquí (alcance del radar, estaciones cercanas, plazo del pronóstico).</p>`;
+      <p class="fc-note">Lluvia combinada: <b>${C.fmtNum1.format(st.rain[k])} mm/h</b>. Cada fuente pesa según su peso general y su calidad aquí (alcance del radar, estaciones cercanas, plazo).</p>`;
   }
 
   function seriesChart(vals) {
-    const CW = 340, CH = 116, PL = 26, PR = 6, PT = 8, PB = 20;
+    const CW = 340, CH = 120, PL = 8, PR = 8, PT = 10, PB = 20;
     const iw = CW - PL - PR, ih = CH - PT - PB, bw = iw / vals.length;
     const y = (v) => PT + ih - (clamp(v, 0, 100) / 100) * ih;
     let g = "";
-    [0, 50, 100].forEach((t) => { g += `<line class="grid" x1="${PL}" x2="${CW - PR}" y1="${y(t)}" y2="${y(t)}"/><text x="${PL - 5}" y="${y(t) + 3.5}" text-anchor="end">${t}</text>`; });
+    [20, 40, 60, 80].forEach((t) => { g += `<line class="grid" x1="${PL}" x2="${CW - PR}" y1="${y(t)}" y2="${y(t)}"/>`; });
     const xNow = PL + NOW_I * bw + bw / 2;
     g += `<line x1="${xNow}" x2="${xNow}" y1="${PT}" y2="${PT + ih}" stroke="currentColor" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>`;
     vals.forEach((v, i) => {
       if (v == null) return;
-      const x = PL + i * bw + 1, w = Math.max(2, bw - 2), top = y(v), h = Math.max(1, PT + ih - top), r = Math.min(2, h, w / 2);
-      g += `<rect class="hit" x="${PL + i * bw}" y="${PT}" width="${bw}" height="${ih}" data-tip="${fmtLead(STEPS[i])}, ${C.fmtHour.format(steps[i].time)}: ${C.fmtNum.format(v)} (${className(v).toLowerCase()})"/>`;
-      g += `<path d="M${x},${PT + ih} V${top + r} Q${x},${top} ${x + r},${top} H${x + w - r} Q${x + w},${top} ${x + w},${top + r} V${PT + ih} Z" fill="${C.bandColor(IDX, v)}" opacity="${i < NOW_I ? 0.6 : 1}" ${i === cur ? 'stroke="currentColor" stroke-width="1.2"' : ""}/>`;
+      const l = levelOf(v);
+      const x = PL + i * bw + 1, w = Math.max(2, bw - 2), top = y(Math.max(v, 3)), h = Math.max(1, PT + ih - top), r = Math.min(2, h, w / 2);
+      g += `<rect class="hit" x="${PL + i * bw}" y="${PT}" width="${bw}" height="${ih}" data-tip="${whenText(steps[i])}: ${LEVELS[l].n}"/>`;
+      g += `<path d="M${x},${PT + ih} V${top + r} Q${x},${top} ${x + r},${top} H${x + w - r} Q${x + w},${top} ${x + w},${top + r} V${PT + ih} Z" fill="${levelColor(l)}" opacity="${i < NOW_I ? 0.6 : 1}" ${i === cur ? 'stroke="currentColor" stroke-width="1.2"' : ""}/>`;
     });
-    [[0, "−6 h"], [NOW_I, "Ahora"], [STEPS.length - 1, "+6 h"]].forEach(([i, t]) => {
+    [[0, "Hace 6 h"], [NOW_I, "Ahora"], [STEPS.length - 1, "En 6 h"]].forEach(([i, t]) => {
       g += `<text x="${PL + i * bw + bw / 2}" y="${CH - 5}" text-anchor="${i === 0 ? "start" : i === STEPS.length - 1 ? "end" : "middle"}">${t}</text>`;
     });
-    return `<svg class="chart" viewBox="0 0 ${CW} ${CH}" role="img" aria-label="Índice CELESTE en las últimas 6 horas y las próximas 6">${g}</svg>`;
+    return `<svg class="chart" viewBox="0 0 ${CW} ${CH}" role="img" aria-label="Peldaño del índice en las últimas 6 horas y las próximas 6">${g}</svg>`;
   }
 })();

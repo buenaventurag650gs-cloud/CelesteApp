@@ -42,18 +42,21 @@
 
     <div class="panel-body">
       <section id="idxPanel" class="idx-panel" hidden>
-        <p class="idx-lead">Un solo valor de 0 a 100, desde hace 6 horas hasta dentro de 6, que pondera los mapas derivados de COCESNA, las estaciones, GOES-Este e IMERG junto con el potencial de tormenta, las ráfagas y el calor. Más oscuro es más intenso. Toca un punto para ver de dónde sale.</p>
+        <p class="idx-lead">Diez peldaños, de <b>Pura vida</b> a <b>Vendaval</b>, desde hace 6 horas hasta dentro de 6. Combina radar, estaciones, satélites y modelo. Toca cualquier punto para ver su ficha.</p>
+        <div id="idxLoc"></div>
         <div id="idxLegend"></div>
         <p class="stamp" id="idxStatus"></p>
+        <div id="idxViz"></div>
         <details class="idx-weights-box">
-          <summary>Ajustar la ponderación</summary>
+          <summary>Ajustar el peso de cada fuente de lluvia</summary>
           <div id="idxWeights"></div>
         </details>
         <details class="about">
           <summary>Cómo se calcula</summary>
           <p><b>Lluvia.</b> En cada punto y cada media hora se promedian las fuentes que tienen dato ahí: el radar de COCESNA (ajustado con la lluvia medida en las estaciones), la superficie de lluvia de las estaciones del IMN y de Panamá, la lluvia estimada por los topes fríos de las nubes de GOES-Este (también ajustada con estaciones), IMERG de la NASA cuando hay imagen de esa hora (llega con unas 5 horas de retraso) y el modelo numérico. Cada fuente pesa según el peso que elijas abajo y su calidad en ese lugar: el alcance del radar, la cercanía de estaciones y el plazo del pronóstico.</p>
           <p><b>Próximas horas.</b> Se mide hacia dónde y a qué velocidad se mueve la lluvia en el radar y se proyecta hasta 3 horas; la lluvia de GOES se desplaza igual hasta 2 horas. Las estaciones aportan su pronóstico corregido, que pierde peso con el plazo. Desde las 3 horas domina el modelo numérico (Open-Meteo, rejilla de 0,3°).</p>
-          <p><b>Otros componentes.</b> El potencial de tormenta, las ráfagas, la probabilidad de lluvia y la sensación térmica vienen del modelo.</p>
+          <p><b>Peldaños.</b> Cada peldaño tiene una regla objetiva. Sin lluvia, manda la nubosidad (satélite GOES-Este en lo observado y modelo en el pronóstico): Pura vida (&lt; 20 %), Despejadillo (20–45 %), Nubladillo (45–80 %) y Amenazando (más de 80 %, o nublado con probabilidad de lluvia de 50 % o más o potencial de tormenta alto). Con lluvia, manda la intensidad: Llovizna (0,2–2,5 mm/h), Aguacero (2,5–7,6), Chaparrón (más de 7,6), Temporal (más de 7,6 sostenida: promedio de 10 mm/h o más durante ±1 hora), Baldazo (40 mm/h o más) y Vendaval (ráfagas de 70 km/h con lluvia, o de 90 km/h). El número de 0 a 100 ubica el punto dentro de su peldaño.</p>
+          <p><b>Probabilidad de lluvia en la ficha.</b> Combina qué parte de los 10 km alrededor del punto recibe lluvia en ese lapso según el mapa combinado (60 %) con la probabilidad del modelo (40 %).</p>
           <p>Es una estimación automática y experimental. Para avisos oficiales consulta al IMN y a la CNE.</p>
         </details>
       </section>

@@ -195,7 +195,7 @@
       if (!g.coordinates.length) return;
       features.push({
         type: "Feature",
-        properties: { c: p.colors[i] },
+        properties: { c: p.colors[i], i },
         geometry: { type: "MultiPolygon", coordinates: g.coordinates.map((poly) => poly.map((ring) => ring.map(project))) },
       });
     });
@@ -265,6 +265,42 @@
     zoomControl: false,
   });
   L.control.zoom({ position: "topright", zoomInTitle: "Acercar", zoomOutTitle: "Alejar" }).addTo(map);
+  // Mi ubicación: pide permiso, centra el mapa, abre la ficha del lugar y avisa a los módulos (alertas)
+  let userMarker = null;
+  const locHooks = [];
+  function locate(opts = {}) {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) { if (!opts.silent) toast("Este navegador no permite conocer la ubicación."); resolve(null); return; }
+      navigator.geolocation.getCurrentPosition((pos) => {
+        const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+        try { localStorage.setItem("celeste-ubicacion", JSON.stringify({ lat, lng, t: Date.now() })); } catch (e) { /* sin almacenamiento */ }
+        if (userMarker) map.removeLayer(userMarker);
+        userMarker = L.marker([lat, lng], { icon: L.divIcon({ className: "", html: '<div class="yo"><span></span></div>', iconSize: [22, 22], iconAnchor: [11, 11] }), keyboard: false, zIndexOffset: 1000, title: "Tu ubicación" }).addTo(map);
+        userMarker.on("click", () => map.fire("click", { latlng: L.latLng(lat, lng) }));
+        if (!opts.noPan) map.setView([lat, lng], Math.max(map.getZoom(), 10));
+        locHooks.forEach((h) => { try { h(lat, lng, accuracy); } catch (e) { /* módulo con error */ } });
+        if (opts.open) map.fire("click", { latlng: L.latLng(lat, lng) });
+        resolve({ lat, lng, accuracy });
+      }, (err) => {
+        if (!opts.silent) toast(err.code === 1 ? "No diste permiso para usar tu ubicación. Puedes activarlo en el candado de la barra de direcciones." : "No se pudo obtener tu ubicación.");
+        resolve(null);
+      }, { enableHighAccuracy: false, timeout: 12000, maximumAge: 5 * 60000 });
+    });
+  }
+  const LocCtl = L.Control.extend({
+    options: { position: "topright" },
+    onAdd() {
+      const b = L.DomUtil.create("button", "loc-btn");
+      b.type = "button";
+      b.title = "Mi ubicación";
+      b.setAttribute("aria-label", "Ver mi ubicación");
+      b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><circle cx="12" cy="12" r="7.5"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/></svg>';
+      L.DomEvent.disableClickPropagation(b);
+      L.DomEvent.on(b, "click", () => locate({ open: true }));
+      return b;
+    },
+  });
+  new LocCtl().addTo(map);
   map.attributionControl.setPrefix(false);
   map.createPane("clima").style.zIndex = 405;
   map.getPane("clima").classList.add("capa-datos");
@@ -416,6 +452,8 @@
 
   const ALL = GROUPS.flatMap((g) => g.layers.flatMap((l) => [l, ...(l.children || [])]));
   ALL.forEach((d) => { (d.children || []).forEach((c) => (c.parent = d)); });
+  // Capa interna (no se muestra): temperatura de topes de GOES en °C, para lluvia y nubosidad del índice
+  ALL.push({ key: "goestemp", type: "hidden", id: "GOES-East_ABI_Band13_Clean_Infrared", tileLevel: 6, level: 6, area: CR_AREA, pal: "lst", srcWidth: 330 });
   let zBase = 410;
   ALL.forEach((def) => {
     if (def.type === "field" || def.type === "radar") {
@@ -924,6 +962,14 @@
 
   let pin = null;
   let pointReq = 0;
+  let ptPlace = "", ptElev = "";
+  // Nombre del lugar (con caché por punto redondeado)
+  const placeCache = new Map();
+  function placeName(lat, lng) {
+    const k = `${lat.toFixed(3)},${lng.toFixed(3)}`;
+    if (!placeCache.has(k)) placeCache.set(k, fetch(`/api/lugar?lat=${lat.toFixed(4)}&lon=${lng.toFixed(4)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null));
+    return placeCache.get(k);
+  }
 
   function openPoint() {
     $("#point").hidden = false;
@@ -973,11 +1019,18 @@
   map.on("click", (e) => {
     const { lat, lng } = e.latlng;
     const req = ++pointReq;
+    ptPlace = ""; ptElev = "";
     if (pin) map.removeLayer(pin);
     pin = L.marker([lat, lng], { icon: L.divIcon({ className: "", html: '<div class="pin"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }), keyboard: false }).addTo(map);
     openPoint();
-    $("#ptTitle").textContent = coordText(lat, lng);
-    $("#ptMeta").textContent = "Consultando…";
+    $("#ptTitle").textContent = "Buscando el lugar…";
+    $("#ptMeta").textContent = coordText(lat, lng);
+    placeName(lat, lng).then((pl) => {
+      if (req !== pointReq) return;
+      $("#ptTitle").textContent = pl && pl.nombre ? pl.nombre : coordText(lat, lng);
+      ptPlace = pl && pl.nombre ? [pl.detalle, coordText(lat, lng)].filter(Boolean).join(" · ") : coordText(lat, lng);
+      $("#ptMeta").textContent = ptPlace + (ptElev ? ` · ${ptElev}` : "");
+    });
     $("#ptBody").innerHTML = `
       ${(window.Celeste.pointHooks || []).map((h) => h(lat, lng)).join("")}
       ${document.body.classList.contains("modo-indice") ? "" : layerValuesHTML(lat, lng)}
@@ -1007,7 +1060,8 @@
 
   function renderForecast(f) {
     const c = f.current;
-    $("#ptMeta").textContent = `Elevación aproximada: ${fmtNum.format(f.elevation)} m`;
+    ptElev = `${fmtNum.format(f.elevation)} m s. n. m.`;
+    $("#ptMeta").textContent = `${ptPlace || ""}${ptPlace ? " · " : ""}${ptElev}`;
     $("#ptNow").className = "";
     $("#ptNow").innerHTML = `
       <div class="now">
@@ -1156,7 +1210,7 @@
   window.Celeste = {
     map, $, PAL, ramp, steps, extent, merc, unmerc, resample, blur, polygons, legendHTML, bandColor,
     readPixels, fmtHour, fmtDay, fmtNum, fmtNum1, fmtNum2, ago, icon, isToday, toast, openPoint, closePoint, wireTips,
-    RADAR_AREA, radarRain, gibsGrid, gibsTimes: (key, hours) => gibsTimes(Object.assign({}, ALL.find((d) => d.key === key), hours ? { window: hours } : {})), time: window.CelesteTime, setOff, SOURCES, pointHooks: [], ext: {},
+    RADAR_AREA, radarRain, gibsGrid, gibsTimes: (key, hours) => gibsTimes(Object.assign({}, ALL.find((d) => d.key === key), hours ? { window: hours } : {})), time: window.CelesteTime, setOff, SOURCES, goesRain, locate, onLocation: (h) => locHooks.push(h), placeName, pointHooks: [], ext: {},
   };
   setBase(baseKey);
   renderPanel();
