@@ -569,7 +569,7 @@
         combineRain(st);
         steps[si] = st;
         computeIndex(st);
-        if (si === NOW_I) { cur = NOW_I; drawBars(); show(NOW_I); $("#idxTimeline").hidden = !active; }
+        if (si === NOW_I) { cur = NOW_I; drawBars(); show(NOW_I); $("#idxTimeline").hidden = !active; renderLoc(); }
         else drawBars();
         await pause();
       }
