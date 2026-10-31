@@ -378,7 +378,7 @@
       const motionTxt = motion ? ` La lluvia se desplaza hacia ${direction(motion.meanX, motion.meanY)} a unos ${C.fmtNum.format(speedKmh(motion.meanX, motion.meanY))} km/h.` : "";
       const calibTxt = calib ? (calib.used ? ` Lluvia del radar ajustada con ${calib.n} estaciones del IMN (×${C.fmtNum1.format(calib.factor)}).` : ` Calibración: solo ${calib.n} estaciones con lluvia; se usa el radar sin ajustar.`) : "";
       setStatus(radarOK
-        ? `Radar de las ${C.fmtHour.format(t0)} y modelo de las ${C.fmtHour.format(new Date(model.times[7] * 1000))}${motionTxt}${calibTxt}`
+        ? `Radar de las ${C.fmtHour.format(t0)} y modelo de las ${C.fmtHour.format(new Date((model.times.filter((t) => t * 1000 <= Date.now()).pop() || model.times[0]) * 1000))}${motionTxt}${calibTxt}`
         : "Sin radar en este momento: el índice usa solo el modelo numérico.");
       $("#idxTimeline").hidden = !active;
     } catch (err) {
