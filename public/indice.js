@@ -48,6 +48,20 @@
     { key: "heat", name: "Calor", w: 10, unit: "°C de sensación", fmt: C.fmtNum, score: (v) => clamp((v - 30) / 10) },
   ];
   const MODEL_KEYS = ["cape", "gust", "pp", "heat"];
+  // Fuentes de la lluvia: cada celda pondera las fuentes que tienen dato ahí (peso × calidad local)
+  const RSRC = [
+    { key: "radar", name: "Radar COCESNA", w: 50, src: "cocesna" },
+    { key: "est", name: "Lluvia de estaciones ±6 h", w: 30, src: "imn" },
+    { key: "goes", name: "GOES-Este, nubes frías", w: 12, src: "noaa" },
+    { key: "imerg", name: "IMERG (satélite)", w: 10, src: "nasa" },
+    { key: "model", name: "Modelo numérico", w: 6, src: null },
+  ];
+  const SUGGESTED_SRC = Object.fromEntries(RSRC.map((r) => [r.key, r.w]));
+  try {
+    const savedS = JSON.parse(store.get("celeste-fuentes") || "null");
+    if (savedS) RSRC.forEach((r) => { if (Number.isFinite(savedS[r.key])) r.w = savedS[r.key]; });
+  } catch (e) { /* pesos por defecto */ }
+  const RW = () => Object.fromEntries(RSRC.map((r) => [r.key, r.w]));
   const SUGGESTED = { rain: 45, cape: 20, gust: 15, pp: 10, heat: 10 };
   try {
     const saved = JSON.parse(store.get("celeste-pesos") || "null");
@@ -70,6 +84,8 @@
   let t0 = null;
   let radarOK = false;
   let calib = null; // {factor, n}
+  let calibG = null; // sesgo de GOES frente a estaciones
+  let sourcesUsed = null;
   let computing = false;
   let computedAt = 0;
   let timer = null, refresh = null;
@@ -291,21 +307,119 @@
   chan.port1.onmessage = () => { const r = waiting.shift(); if (r) r(); };
   const pause = () => new Promise((r) => { waiting.push(r); chan.port2.postMessage(0); });
 
+  // Satélite: horas disponibles y rejillas sobre el área del índice (se piden en paralelo)
+  async function loadSat(key, hours, tolMin) {
+    if (!C.gibsTimes) return null;
+    const times = await C.gibsTimes(key, hours);
+    if (!times.length) return null;
+    const grids = new Map();
+    const get = (t) => {
+      if (!grids.has(t)) grids.set(t, C.gibsGrid(key, new Date(t).toISOString().slice(0, 19) + "Z", AREA, key === "imerg30" ? 8 : 4).then((g) => g.grid).catch(() => null));
+      return grids.get(t);
+    };
+    const pick = (ms) => { let b = null, bd = Infinity; times.forEach((t) => { const d = Math.abs(t - ms); if (d < bd) { bd = d; b = t; } }); return bd <= tolMin * 60000 ? b : null; };
+    return { times, get, pick, last: times[times.length - 1] };
+  }
+
+  // Estaciones: la serie horaria (IMN + IMHPA) remuestreada al área del índice
+  function prepareStations(serie) {
+    if (!serie || !C.stations.AREA) return null;
+    const A = C.stations.AREA;
+    const lastObs = serie.steps.filter((st) => st.kind !== "pronostico").pop();
+    let covLast = null;
+    const steps = serie.steps.map((st) => {
+      const g = C.resample(st.grid, A.w, A.h, W, H);
+      let cov = null;
+      if (st.ws) {
+        const c = C.resample(st.ws, A.w, A.h, W, H);
+        cov = new Uint8Array(N);
+        for (let k = 0; k < N; k++) cov[k] = Math.round(255 * clamp((c[k] - A.MIN_W) / 0.5));
+        if (st === lastObs) covLast = cov;
+      }
+      return { end: st.time.getTime(), h: st.h, grid: g, cov, fc: st.kind === "pronostico" };
+    });
+    steps.forEach((st) => { if (!st.cov) st.cov = covLast; });
+    return { steps, t0: serie.t0, n: serie.nStations, nPa: serie.nPa || 0 };
+  }
+  const estStepAt = (est, ms) => est && est.steps.find((st) => ms > st.end - 3600000 && ms <= st.end + 60000);
+
+  // Desplazamiento de una rejilla (persistencia de la lluvia de GOES hacia adelante)
+  function shift(g, dx, dy) {
+    const out = new Float32Array(N);
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) out[j * W + i] = bilinear(g, W, H, i - dx, j - dy);
+    return out;
+  }
+
+  // Combina las fuentes de lluvia de un paso con los pesos actuales
+  function combineRain(st) {
+    const w = RW();
+    const P = st.parts;
+    const mr = C.resample(P.mrC, CWd, CHd, W, H);
+    const rain = st.rain || new Float32Array(N);
+    const eq = P.est && P.est.q;
+    for (let k = 0; k < N; k++) {
+      let num = w.model * (Number.isFinite(mr[k]) ? mr[k] : 0), den = w.model;
+      if (P.rr && w.radar) { const q = radW[k] * P.wTime; if (q > 0) { num += w.radar * q * P.rr[k] / 100; den += w.radar * q; } }
+      if (P.est && w.est) { const q = (eq ? eq[k] / 255 : 0) * P.est.decay; const v = P.est.grid[k]; if (q > 0 && Number.isFinite(v)) { num += w.est * q * v; den += w.est * q; } }
+      if (P.goes && w.goes) { const v = P.goes[k]; if (Number.isFinite(v)) { const q = P.goesQ; num += w.goes * q * v * P.goesF; den += w.goes * q; } }
+      if (P.imerg && w.imerg) { const v = P.imerg[k]; if (Number.isFinite(v)) { num += w.imerg * v; den += w.imerg; } }
+      rain[k] = den > 0 ? num / den : 0;
+    }
+    st.rain = rain;
+  }
+
+  // Sesgo de GOES frente a las estaciones (lluvia acumulada en 3 h)
+  async function calibrateSat(sat, endMs) {
+    if (!sat || !C.stations) return null;
+    let data;
+    try { data = await C.stations.load(); } catch (e) { return null; }
+    const frames = [];
+    for (let m = 150; m >= 0; m -= 30) { const t = sat.pick(endMs - m * 60000); if (t) frames.push(await sat.get(t)); }
+    const ok = frames.filter(Boolean);
+    if (ok.length < 4) return null;
+    const [x0, y0, x1, y1] = AREA.bbox;
+    let sg = 0, ss = 0, n = 0;
+    (data.hourly || data.imn).forEach((s) => {
+      if (!s.q || !s.rows.length) return;
+      const g = C.stations.accum(s, 3, s.rows[0][0]);
+      if (g == null || Math.abs(s.rows[0][0] - endMs) > 90 * 60000) return;
+      const [X, Y] = C.merc(s.lat, s.lon);
+      const i = ((X - x0) / (x1 - x0)) * W - 0.5, j = ((y1 - Y) / (y1 - y0)) * H - 0.5;
+      if (i < 0 || j < 0 || i > W - 1 || j > H - 1) return;
+      let est = 0;
+      ok.forEach((f) => { est += bilinear(f, W, H, i, j) * 0.5; });
+      est *= 6 / ok.length;
+      if (g < 0.5 && est < 0.5) return;
+      sg += g; ss += est; n++;
+    });
+    if (n < 5 || ss < 1) return { factor: 1, n, used: false };
+    return { factor: clamp(sg / ss, 0.15, 2.5), n, used: true };
+  }
+
   async function run() {
     if (computing) return;
     computing = true;
-    setStatus("Leyendo radar, estaciones y modelo…");
+    setStatus("Leyendo radar, estaciones, satélites y modelo…");
     try {
-      const [radar, , model] = await Promise.all([
+      const [radar, , model, serie, goes, imerg] = await Promise.all([
         loadRadar().catch(() => null),
         loadMask(),
         fetch("/api/celeste/modelo").then((r) => { if (!r.ok) throw new Error("modelo"); return r.json(); }),
+        C.stations && C.stations.serie ? C.stations.serie().catch(() => null) : null,
+        loadSat("goesrain", 7, 8).catch(() => null),
+        loadSat("imerg30", 12, 16).catch(() => null),
       ]);
       radarOK = !!radar;
       t0 = radar ? new Date(radar.time) : new Date(Math.floor(Date.now() / 600000) * 600000);
       calib = radar ? await calibrate(radar) : null;
       const factor = calib && calib.used ? calib.factor : 1;
-      setStatus(radarOK ? "Calculando el movimiento de la lluvia…" : "Sin radar en este momento: se usa solo el modelo.");
+      const est = prepareStations(serie);
+      // GOES: imágenes para los pasos observados (en paralelo) y calibración con estaciones
+      if (goes) STEPS.forEach((L) => { if (L <= 0) { const t = goes.pick(t0.getTime() + L * 60000); if (t) goes.get(t); } });
+      if (imerg) STEPS.forEach((L) => { if (L <= 0) { const t = imerg.pick(t0.getTime() + L * 60000); if (t) imerg.get(t); } });
+      calibG = goes ? await calibrateSat(goes, t0.getTime()) : null;
+      const goesF = calibG && calibG.used ? calibG.factor : 0.6;
+      setStatus(radarOK ? "Calculando el movimiento de la lluvia…" : "Sin radar en este momento: se combinan estaciones, satélites y modelo.");
       await pause();
 
       // Movimiento con las imágenes de −60, −30 y 0 min
@@ -327,29 +441,34 @@
           motion = { ...combo, meanX: sx / n, meanY: sy / n };
         }
       }
+      // Desplazamiento medio en celdas del índice por minuto (para proyectar GOES)
+      const idxCellKm = ((AREA.bbox[2] - AREA.bbox[0]) / W / 1000) * Math.cos(9.7 * toRad);
+      const mvx = motion ? (motion.meanX * radarCellKm) / idxCellKm : 0, mvy = motion ? (motion.meanY * radarCellKm) / idxCellKm : 0;
+      const goesLast = goes ? await goes.get(goes.last) : null;
+      const goesLastAge = goes ? (t0.getTime() - goes.last) / 60000 : 0;
 
       steps.forEach((s) => s.layer && map.removeLayer(s.layer));
       steps = [];
       const rw = C.RADAR_AREA.w, rh = C.RADAR_AREA.h;
       const latest = radar ? radar.frames[0] : null;
+      const used = { radar: false, est: false, goes: 0, imerg: 0 };
 
-      // Orden de cálculo: ahora primero, luego futuro y pasado alternando
       const order = [NOW_I];
       for (let d = 1; d <= 12; d++) { order.push(NOW_I + d); order.push(NOW_I - d); }
 
       for (const si of order) {
         const L = STEPS[si];
-        const tSec = t0.getTime() / 1000 + L * 60;
-        const rain = new Float32Array(N);
-        let source;
-        // Lluvia del radar: observada (pasado/ahora) o proyectada (futuro)
+        const ms = t0.getTime() + L * 60000;
+        const tSec = ms / 1000;
+        // Radar: observado (pasado/ahora) o proyectado (futuro)
         let radarField = null, wTime = 0, sigma = 0.9;
         if (radar) {
           if (L <= 0) { radarField = radar.frames[L] || null; wTime = radarField ? 1 : 0; }
           else { radarField = latest; wTime = clamp(1 - L / BLEND_END); sigma = 0.9 + (L / 60) * 1.6; }
         }
-        const rr = new Float32Array(N);
+        let rr16 = null;
         if (radarField && wTime > 0) {
+          const rr = new Float32Array(N);
           const decay = L > 0 ? Math.exp(-L / 150) : 1;
           for (let k = 0; k < N; k++) {
             if (radW[k] <= 0) continue;
@@ -361,22 +480,38 @@
             }
             rr[k] = bilinear(radarField.grid, rw, rh, x, y) * decay * factor;
           }
+          const rrS = C.blur(rr, W, H, sigma);
+          rr16 = new Uint16Array(N);
+          for (let k = 0; k < N; k++) rr16[k] = Math.min(65535, Math.round((Number.isFinite(rrS[k]) ? rrS[k] : 0) * 100));
+          used.radar = true;
         }
-        const rrS = radarField && wTime > 0 ? C.blur(rr, W, H, sigma) : rr;
-        const mrC = modelCoarse(model, "precipitation", tSec + 1800, true);
-        const mr = C.resample(mrC, CWd, CHd, W, H);
-        for (let k = 0; k < N; k++) {
-          const wr = radarField ? radW[k] * wTime : 0;
-          rain[k] = wr * (Number.isFinite(rrS[k]) ? rrS[k] : 0) + (1 - wr) * (Number.isFinite(mr[k]) ? mr[k] : 0);
+        // Estaciones: la hora que contiene este instante; en el pronóstico la confianza baja con el plazo
+        const es = estStepAt(est, ms);
+        const estPart = es ? { grid: es.grid, q: es.cov, decay: es.fc ? clamp(1 - Math.max(0, (ms - est.t0) / 3600000) / 8) : 1 } : null;
+        if (estPart) used.est = true;
+        // GOES: imagen de esa hora (pasado) o la última, desplazada con el movimiento de la lluvia (hasta +2 h)
+        let goesG = null, goesQ = 0;
+        if (goes) {
+          if (L <= 0) { const t = goes.pick(ms); if (t) { goesG = await goes.get(t); goesQ = 1; } }
+          else if (goesLast && L <= 120) { goesG = shift(goesLast, mvx * (L + goesLastAge), mvy * (L + goesLastAge)); goesQ = clamp(1 - L / 120); }
+          if (goesG) used.goes++;
         }
-        source = !radarField || wTime === 0 ? "modelo" : L < 0 ? "observado" : L === 0 ? "ahora" : "proyectado";
-        const coarse = {
-          cape: modelCoarse(model, "cape", tSec, true),
-          gust: modelCoarse(model, "wind_gusts_10m", tSec + 1800, true),
-          pp: modelCoarse(model, "precipitation_probability", tSec + 1800, true),
-          heat: modelCoarse(model, "apparent_temperature", tSec, false),
+        // IMERG: solo donde hay imagen de esa hora (llega con unas 5 h de retraso)
+        let imergG = null;
+        if (imerg && L <= 0) { const t = imerg.pick(ms); if (t) { imergG = await imerg.get(t); if (imergG) used.imerg++; } }
+
+        const st = {
+          min: L, time: new Date(ms),
+          parts: { rr: rr16, wTime, est: estPart, goes: goesG, goesQ, goesF, imerg: imergG, mrC: modelCoarse(model, "precipitation", tSec + 1800, true) },
+          coarse: {
+            cape: modelCoarse(model, "cape", tSec, true),
+            gust: modelCoarse(model, "wind_gusts_10m", tSec + 1800, true),
+            pp: modelCoarse(model, "precipitation_probability", tSec + 1800, true),
+            heat: modelCoarse(model, "apparent_temperature", tSec, false),
+          },
+          source: !radarField || wTime === 0 ? "modelo" : L < 0 ? "observado" : L === 0 ? "ahora" : "proyectado",
         };
-        const st = { min: L, time: new Date(t0.getTime() + L * 60000), rain, coarse, source };
+        combineRain(st);
         steps[si] = st;
         computeIndex(st);
         if (si === NOW_I) { cur = NOW_I; drawBars(); show(NOW_I); $("#idxTimeline").hidden = !active; }
@@ -386,13 +521,20 @@
       computedAt = Date.now();
       const motionTxt = motion ? ` La lluvia se desplaza hacia ${direction(motion.meanX, motion.meanY)} a unos ${C.fmtNum.format(speedKmh(motion.meanX, motion.meanY))} km/h.` : "";
       const mos = radar && radar.mosaic;
-      const mosTxt = mos ? (mos.fresh ? ` Radar del IMN incluido${mos.ratio ? ` (en la zona común marca ${C.fmtNum1.format(mos.ratio)} veces lo de COCESNA)` : ""}.` : " El radar del IMN no publica imágenes recientes; no se incluye.") : "";
-      const calibTxt = calib ? (calib.used ? ` Lluvia del radar ajustada con ${calib.n} estaciones del IMN (×${C.fmtNum1.format(calib.factor)}).` : ` Calibración: solo ${calib.n} estaciones con lluvia; se usa el radar sin ajustar.`) : "";
-      setStatus(radarOK
-        ? `Radar de las ${C.fmtHour.format(t0)} y modelo de las ${C.fmtHour.format(new Date((model.times.filter((t) => t * 1000 <= Date.now()).pop() || model.times[0]) * 1000))}${motionTxt}${calibTxt}${mosTxt}`
-        : "Sin radar en este momento: el índice usa solo el modelo numérico.");
+      const mosTxt = mos && !mos.fresh ? " El radar del IMN no publica imágenes recientes; no se incluye." : mos && mos.fresh ? " Radar del IMN incluido." : "";
+      const calibTxt = calib ? (calib.used ? ` Radar ajustado con ${calib.n} estaciones (×${C.fmtNum1.format(calib.factor)}).` : "") : "";
+      const parts = [];
+      if (used.radar) parts.push("radar de COCESNA");
+      if (used.est && est) parts.push(`${est.n} estaciones (${est.n - est.nPa} IMN, ${est.nPa} IMHPA)`);
+      if (used.goes) parts.push(`GOES-Este${calibG && calibG.used ? ` (ajustado ×${C.fmtNum1.format(calibG.factor)})` : ""}`);
+      if (used.imerg) parts.push(`IMERG en ${used.imerg} pasos`);
+      parts.push("modelo");
+      sourcesUsed = used;
+      setStatus(`Lluvia combinada de ${parts.join(", ")}. Radar de las ${radarOK ? C.fmtHour.format(t0) : "—"}.${motionTxt}${calibTxt}${mosTxt}`);
+      renderWeights();
       $("#idxTimeline").hidden = !active;
     } catch (err) {
+      console.error("indice", err);
       setStatus("No se pudo calcular el índice. Vuelve a intentarlo en unos minutos.");
       C.toast("No se pudo calcular el índice CELESTE en este momento.");
     }
@@ -564,7 +706,14 @@
   function renderWeights() {
     const wrap = $("#idxWeights");
     const total = COMPS.reduce((s, c) => s + c.w, 0) || 1;
-    wrap.innerHTML = COMPS.map((c) => `
+    const totalS = RSRC.reduce((s, c) => s + c.w, 0) || 1;
+    const avail = (k) => !sourcesUsed || k === "model" || (k === "radar" ? sourcesUsed.radar : k === "est" ? sourcesUsed.est : sourcesUsed[k] > 0);
+    wrap.innerHTML = `<p class="w-title">Fuentes de la lluvia</p><p class="w-note">En cada punto se promedian las fuentes que tienen dato ahí, con estos pesos.</p>` + RSRC.map((c) => `
+      <div class="weight${avail(c.key) ? "" : " sin-dato"}">
+        <label for="ws-${c.key}">${c.src && C.SOURCES && C.SOURCES[c.src] ? `<span class="w-chip">${C.SOURCES[c.src].name}</span>` : ""}${c.name}${avail(c.key) ? "" : " <em>(sin dato ahora)</em>"}</label>
+        <input id="ws-${c.key}" type="range" min="0" max="100" step="2" value="${c.w}" data-src="${c.key}">
+        <output for="ws-${c.key}">${C.fmtNum.format((c.w / totalS) * 100)} %</output>
+      </div>`).join("") + `<p class="w-title">Componentes del índice</p>` + COMPS.map((c) => `
       <div class="weight">
         <label for="w-${c.key}">${c.name}</label>
         <input id="w-${c.key}" type="range" min="0" max="100" step="5" value="${c.w}" data-key="${c.key}">
@@ -581,18 +730,35 @@
       store.set("celeste-pesos", JSON.stringify(Object.fromEntries(COMPS.map((c) => [c.key, c.w]))));
     }, 250);
   }
+  let resourceTimer = null;
   document.addEventListener("input", (e) => {
+    const es = e.target.closest("#idxWeights input[data-src]");
+    if (es) {
+      RSRC.find((c) => c.key === es.dataset.src).w = parseInt(es.value, 10);
+      const totalS = RSRC.reduce((s, c) => s + c.w, 0) || 1;
+      document.querySelectorAll("#idxWeights input[data-src]").forEach((inp) => { inp.nextElementSibling.textContent = `${C.fmtNum.format((RSRC.find((c) => c.key === inp.dataset.src).w / totalS) * 100)} %`; });
+      clearTimeout(resourceTimer);
+      resourceTimer = setTimeout(() => {
+        steps.forEach((s) => { if (s) { combineRain(s); computeIndex(s); } });
+        drawBars(); show(cur);
+        store.set("celeste-fuentes", JSON.stringify(RW()));
+      }, 300);
+      return;
+    }
     const el = e.target.closest("#idxWeights input[data-key]");
     if (!el) return;
     COMPS.find((c) => c.key === el.dataset.key).w = parseInt(el.value, 10);
     const total = COMPS.reduce((s, c) => s + c.w, 0) || 1;
-    document.querySelectorAll("#idxWeights output").forEach((o, i) => (o.textContent = `${C.fmtNum.format((COMPS[i].w / total) * 100)} %`));
+    document.querySelectorAll("#idxWeights input[data-key]").forEach((inp) => { inp.nextElementSibling.textContent = `${C.fmtNum.format((COMPS.find((c) => c.key === inp.dataset.key).w / total) * 100)} %`; });
     reweight();
   });
   document.addEventListener("click", (e) => {
     if (!e.target.closest("#idxReset")) return;
     COMPS.forEach((c) => (c.w = SUGGESTED[c.key]));
+    RSRC.forEach((c) => (c.w = SUGGESTED_SRC[c.key]));
+    store.set("celeste-fuentes", JSON.stringify(RW()));
     renderWeights();
+    steps.forEach((s) => s && combineRain(s));
     reweight();
   });
 
@@ -658,8 +824,27 @@
           <span class="part-bar"><span style="width:${(p.pts / maxPts) * 100}%"></span></span>
           <b>+${C.fmtNum.format(p.pts)}</b>
         </div>`).join("")}</div>
-      <p class="source">${radW[k] > 0.5 && st.source !== "modelo" ? `Lluvia: radar de COCESNA${calib && calib.used ? " calibrado con estaciones del IMN" : ""}${st.source === "proyectado" ? ", proyectado," : ""} y modelo.` : "Lluvia: modelo numérico (fuera del alcance del radar o más allá de 3 horas)."} Es una estimación automática; para avisos oficiales consulta al IMN y a la CNE.</p>`;
+      <p class="chart-title">De dónde sale la lluvia aquí</p>
+      ${rainSourcesHTML(st, k, ck)}
+      <p class="source">Es una estimación automática; para avisos oficiales consulta al IMN y a la CNE.</p>`;
   });
+
+  function rainSourcesHTML(st, k, ck) {
+    const w = RW(), P = st.parts;
+    if (!P) return "";
+    const mrv = P.mrC[ck];
+    const rows = [];
+    if (P.rr && radW[k] * P.wTime > 0) rows.push(["Radar COCESNA" + (st.min > 0 ? " (proyectado)" : ""), w.radar * radW[k] * P.wTime, P.rr[k] / 100]);
+    if (P.est && P.est.q && P.est.q[k] > 0 && Number.isFinite(P.est.grid[k])) rows.push(["Estaciones ±6 h" + (st.min > 0 ? " (pronóstico)" : ""), w.est * (P.est.q[k] / 255) * P.est.decay, P.est.grid[k]]);
+    if (P.goes && Number.isFinite(P.goes[k])) rows.push(["GOES-Este" + (st.min > 0 ? " (desplazado)" : ""), w.goes * P.goesQ, P.goes[k] * P.goesF]);
+    if (P.imerg && Number.isFinite(P.imerg[k])) rows.push(["IMERG", w.imerg, P.imerg[k]]);
+    rows.push(["Modelo numérico", w.model, mrv]);
+    const tot = rows.reduce((s, r) => s + r[1], 0) || 1;
+    return `<div class="parts">${rows.filter((r) => r[1] > 0).map(([n, wt, v]) => `
+      <div class="part"><span class="part-name">${n}<br><span class="muted">${C.fmtNum1.format(v)} mm/h</span></span>
+      <span class="part-bar"><span style="width:${(wt / tot) * 100}%"></span></span><b>${C.fmtNum.format((wt / tot) * 100)} %</b></div>`).join("")}</div>
+      <p class="source">Lluvia combinada en este punto: <b>${C.fmtNum1.format(st.rain[k])} mm/h</b>. Cada fuente pesa según su peso general y su calidad aquí (alcance del radar, estaciones cercanas, plazo del pronóstico).</p>`;
+  }
 
   function seriesChart(vals) {
     const CW = 340, CH = 116, PL = 26, PR = 6, PT = 8, PB = 20;

@@ -384,3 +384,78 @@ body.tl-apiladas #timeline { bottom: 116px; }
 .st-al-dia { color: #2f8a4c; }
 .st-atrasada, .st-sin-datos { color: var(--warm); }
 .st-sin-tabla { color: var(--muted); }
+
+/* ---------- Jerarquía: fuente → derivados ---------- */
+.group h2 { display: flex; align-items: center; gap: 6px; }
+.group h2 .ico { width: 16px; height: 16px; color: var(--accent); }
+.family + .family { margin-top: 8px; }
+.family .layer { margin-bottom: 0; }
+.children { margin: 0 0 0 22px; padding-left: 12px; border-left: 2px dashed var(--line); }
+.children .layer { margin-top: 6px; background: color-mix(in srgb, var(--accent-soft) 35%, var(--card-solid)); }
+.children .layer::before { content: ""; position: absolute; left: -14px; top: 22px; width: 12px; border-top: 2px dashed var(--line); }
+.layer { position: relative; }
+.layer.sub .layer-name { font-size: 13.5px; }
+.layer.sub .layer-ico { width: 26px; height: 26px; }
+.layer-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 1px; }
+.tag { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 99px; line-height: 1.45; white-space: nowrap; }
+.tag svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 2; }
+.tag-idx { background: #12324a; color: #fff; }
+.tag-idx svg { stroke: none; fill: none; }
+.tag-idx.pausa { background: transparent; color: var(--muted); border: 1px dashed var(--muted); }
+.tag-der { background: var(--warm-soft); color: var(--warm); }
+.tag-time { color: var(--muted); border: 1px solid var(--line); padding: 1px 4px; }
+:root[data-theme="dark"] .tag-idx { background: #cfe5f6; color: #0a2652; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tag-idx { background: #cfe5f6; color: #0a2652; } }
+.layer-top { display: none; }
+.td-fuera { filter: grayscale(1) opacity(0.35); }
+.rio-ico span { display: inline-block; transform: translate(-50%, -50%); font: 700 10.5px/1 var(--font); padding: 3px 5px; border-radius: 6px; background: #1f6fb2; color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); white-space: nowrap; }
+.rio-ico span::before { content: "≋ "; }
+
+/* ---------- Pesos del índice ---------- */
+.w-title { margin: 12px 0 2px; font-weight: 700; font-size: 13px; }
+.w-note { margin: 0 0 4px; font-size: 12px; color: var(--muted); }
+.w-chip { display: inline-block; font-size: 10px; font-weight: 700; padding: 0 5px; margin-right: 4px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.weight.sin-dato label { opacity: .6; }
+.weight label em { font-style: normal; font-size: 11.5px; color: var(--warm); }
+.weight { grid-template-columns: 1fr 96px 40px; }
+
+/* ---------- Línea de tiempo común ---------- */
+.tdock { flex-direction: column; align-items: stretch; gap: 6px; padding: 10px 14px 8px; max-width: 760px; }
+.td-head { display: flex; align-items: center; gap: 12px; }
+.td-head .play { width: 40px; height: 40px; }
+.td-clock { display: flex; align-items: baseline; gap: 8px; flex: 1; min-width: 0; }
+.td-now { border: 1px solid var(--line); background: var(--card-solid); color: var(--ink); border-radius: 99px; padding: 5px 10px; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.td-now:hover { border-color: var(--accent); }
+.td-fold { border: 0; background: none; color: var(--muted); width: 28px; height: 28px; border-radius: 8px; cursor: pointer; display: grid; place-items: center; }
+.td-fold svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; transition: transform .2s; }
+.tdock.folded .td-fold svg { transform: rotate(180deg); }
+.tdock.folded .td-row { display: none; }
+.tdock.folded .td-grid { min-height: 10px; }
+.td-body { position: relative; }
+.td-grid { position: relative; display: grid; gap: 3px; cursor: pointer; touch-action: none; outline-offset: 3px; }
+.td-row { display: grid; grid-template-columns: 112px 1fr; align-items: center; gap: 8px; height: 20px; }
+.td-lbl { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+.td-lbl .ico { width: 14px; height: 14px; flex: none; color: var(--accent); }
+.td-lbl span { overflow: hidden; text-overflow: ellipsis; }
+.td-lane { position: relative; height: 100%; border-radius: 5px; background: color-mix(in srgb, var(--line) 45%, transparent); overflow: hidden; }
+.td-lane i { position: absolute; bottom: 0; min-width: 2px; border-radius: 2px 2px 0 0; background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.td-lane i.fc { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 45%, transparent) 0 3px, transparent 3px 5px); }
+.td-lane i.cur { background: var(--ink); }
+.td-off { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-style: normal; font-size: 10.5px; color: var(--warm); pointer-events: none; text-shadow: 0 0 3px var(--card-solid); }
+.td-row.fuera .td-lbl { opacity: .55; }
+.td-lanes-area { position: absolute; top: -3px; bottom: -3px; left: 120px; right: 0; pointer-events: none; z-index: 2; }
+.td-cursor { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--ink); border-radius: 2px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--card-solid) 70%, transparent); }
+.td-cursor::before { content: ""; position: absolute; top: -5px; left: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--ink); }
+.td-nowline { position: absolute; top: 0; bottom: 0; border-left: 1.5px dashed var(--warm); }
+.td-scale { position: relative; height: 15px; margin-left: 120px; font-size: 10.5px; color: var(--muted); }
+.td-scale span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.td-scale .td-nowlbl { color: var(--warm); font-weight: 700; top: 0; transform: translateX(-50%); background: var(--card); padding: 0 3px; border-radius: 4px; }
+.modo-indice #tdock { display: none !important; }
+@media (max-width: 820px) {
+  .tdock { padding: 8px 10px 6px; }
+  .td-row { grid-template-columns: 74px 1fr; height: 18px; }
+  .td-lanes-area { left: 82px; }
+  .td-scale { margin-left: 82px; }
+  .td-lbl { font-size: 10.5px; }
+  .td-now { padding: 4px 8px; font-size: 11.5px; }
+}

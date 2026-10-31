@@ -42,7 +42,7 @@
 
     <div class="panel-body">
       <section id="idxPanel" class="idx-panel" hidden>
-        <p class="idx-lead">Pondera lluvia, potencial de tormenta, ráfagas, probabilidad de lluvia y calor en un solo valor de 0 a 100, desde hace 6 horas hasta dentro de 6. Más oscuro es más intenso. Toca un punto para ver su evolución y qué pesa más.</p>
+        <p class="idx-lead">Un solo valor de 0 a 100, desde hace 6 horas hasta dentro de 6, que pondera los mapas derivados de COCESNA, las estaciones, GOES-Este e IMERG junto con el potencial de tormenta, las ráfagas y el calor. Más oscuro es más intenso. Toca un punto para ver de dónde sale.</p>
         <div id="idxLegend"></div>
         <p class="stamp" id="idxStatus"></p>
         <details class="idx-weights-box">
@@ -51,13 +51,13 @@
         </details>
         <details class="about">
           <summary>Cómo se calcula</summary>
-          <p>Últimas 6 horas: lo observado por el radar de COCESNA, ajustado con la lluvia medida cada hora en las estaciones del IMN (se compara lo que cayó en cada estación con lo que estimó el radar y se corrige la intensidad). Fuera del alcance del radar se usa el modelo.</p>
-          <p>Próximas 3 horas: se mide hacia dónde y a qué velocidad se mueve la lluvia comparando las últimas imágenes del radar de COCESNA, y se proyecta hacia adelante. Con el plazo la lluvia proyectada se debilita y se difumina, porque la incertidumbre crece.</p>
-          <p>Desde las 3 horas, y fuera del alcance del radar, se usa el modelo numérico (Open-Meteo, rejilla de 0,3°). El potencial de tormenta, las ráfagas, la probabilidad de lluvia y la sensación térmica vienen del modelo.</p>
+          <p><b>Lluvia.</b> En cada punto y cada media hora se promedian las fuentes que tienen dato ahí: el radar de COCESNA (ajustado con la lluvia medida en las estaciones), la superficie de lluvia de las estaciones del IMN y de Panamá, la lluvia estimada por los topes fríos de las nubes de GOES-Este (también ajustada con estaciones), IMERG de la NASA cuando hay imagen de esa hora (llega con unas 5 horas de retraso) y el modelo numérico. Cada fuente pesa según el peso que elijas abajo y su calidad en ese lugar: el alcance del radar, la cercanía de estaciones y el plazo del pronóstico.</p>
+          <p><b>Próximas horas.</b> Se mide hacia dónde y a qué velocidad se mueve la lluvia en el radar y se proyecta hasta 3 horas; la lluvia de GOES se desplaza igual hasta 2 horas. Las estaciones aportan su pronóstico corregido, que pierde peso con el plazo. Desde las 3 horas domina el modelo numérico (Open-Meteo, rejilla de 0,3°).</p>
+          <p><b>Otros componentes.</b> El potencial de tormenta, las ráfagas, la probabilidad de lluvia y la sensación térmica vienen del modelo.</p>
           <p>Es una estimación automática y experimental. Para avisos oficiales consulta al IMN y a la CNE.</p>
         </details>
       </section>
-      <p class="hint">Activa capas y toca cualquier punto del mapa para ver su pronóstico y su clima histórico.</p>
+      <p class="hint">Cada fuente oficial muestra su dato crudo; debajo, con sangría, los mapas que Celeste deriva de ella. Las capas con reloj se animan con la línea de tiempo de abajo. Toca cualquier punto del mapa para ver sus valores.</p>
       <div id="layerGroups"></div>
 
       <section class="group">
@@ -71,7 +71,7 @@
 
       <details class="about">
         <summary>Fuentes y avisos</summary>
-        <p>Radar: COCESNA (prototipo, uso en gestión). Satélite, lluvia estimada, mar, suelo, vegetación e incendios: NASA GIBS (GOES-Este, GPM IMERG, GHRSST, MODIS, VIIRS). Pronóstico y clima histórico: Open-Meteo con datos de ERA5 (Copernicus), CC BY 4.0. Mapas de fondo: Esri y OpenStreetMap.</p>
+        <p>Radar: COCESNA (prototipo, uso en gestión) e IMN. Estaciones: IMN (datos preliminares) e IMHPA de Panamá (Ley 209 de 2021). Satélite, lluvia estimada, mar, suelo, vegetación e incendios: NASA GIBS (GOES-Este, GPM IMERG, GHRSST, MODIS, VIIRS). Pronóstico y clima histórico: Open-Meteo con datos de ERA5 (Copernicus), CC BY 4.0. Mapas de fondo: Esri y OpenStreetMap.</p>
         <p>Celeste es un prototipo informativo. Para avisos oficiales consulta al IMN y a la CNE.</p>
       </details>
     </div>
@@ -86,35 +86,6 @@
       Capas
     </button>
   </div>
-
-  <!-- Línea de tiempo del radar -->
-  <section id="timeline" class="timeline" aria-label="Animación del radar" hidden>
-    <button id="btnPlay" class="play" type="button" aria-label="Reproducir animación del radar">
-      <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
-      <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
-    </button>
-    <div class="tl-main">
-      <div class="tl-head">
-        <span id="tlTime" class="tl-time">—</span>
-        <span id="tlAgo" class="tl-ago"></span>
-      </div>
-      <div id="tlBars" class="tl-bars" role="slider" tabindex="0" aria-label="Hora de la imagen de radar" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"></div>
-      <div class="tl-foot"><span id="tlStart"></span><span>Área con lluvia en el radar</span><span id="tlEnd"></span></div>
-    </div>
-  </section>
-
-  <!-- Línea de tiempo de las estaciones -->
-  <section id="estTimeline" class="timeline est-timeline" aria-label="Lluvia medida en estaciones, por hora" hidden>
-    <button id="estPlay" class="play" type="button" aria-label="Reproducir la animación de estaciones">
-      <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
-      <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
-    </button>
-    <div class="tl-main">
-      <div class="tl-head"><span id="estTime" class="tl-time">—</span><span id="estAgo" class="tl-ago"></span></div>
-      <div id="estBars" class="tl-bars" role="slider" tabindex="0" aria-label="Hora de la lluvia en estaciones" aria-valuemin="0" aria-valuemax="12" aria-valuenow="6"></div>
-      <div class="tl-foot"><span id="estStart"></span><span>Medido ← Última hora → Pronóstico</span><span id="estEnd"></span></div>
-    </div>
-  </section>
 
   <!-- Línea de tiempo del índice -->
   <section id="idxTimeline" class="timeline idx-timeline" aria-label="Pronóstico del índice CELESTE" hidden>
@@ -149,6 +120,7 @@
   <script src="https://cdn.jsdelivr.net/npm/d3-array@3.2.4/dist/d3-array.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3-contour@4.0.2/dist/d3-contour.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+  <script src="/tiempo.js"></script>
   <script src="/app.js"></script>
   <script src="/radar-imn.js"></script>
   <script src="/estaciones.js"></script>

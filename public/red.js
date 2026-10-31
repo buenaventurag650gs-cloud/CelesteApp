@@ -202,7 +202,22 @@
     m.on("mouseover", () => el() && el().classList.add("leaflet-tooltip-hover"));
     m.on("mouseout", () => el() && el().classList.remove("leaflet-tooltip-hover"));
   }
-  function valueOf(site, mode) { return site[mode]; }
+  // Valor de una estación para la hora elegida en la línea de tiempo (null = lo más reciente)
+  const near10 = (rows, t) => rows.find((r) => Math.abs(r[0] - t) < 10 * 60000);
+  function at(site, mode, t) {
+    if (t == null) return site[mode];
+    for (const m of site.members || [site]) {
+      if (mode === "temp") {
+        if (m.filas && m.cols) { const iT = m.cols.findIndex((c) => /^temp/i.test(c)); const r = iT >= 0 && near10(m.filas, t); if (r && r[iT + 1] != null) return r[iT + 1]; }
+        continue;
+      }
+      if (!m.rows || !m.rows.length) continue;
+      if (mode === "rain1") { const r = near10(m.rows, t); if (r && r[1] != null) return r[1]; }
+      if (mode === "rain24" && near10(m.rows, t)) { const v = C.stations.accum(m, 24, t); if (v != null) return v; }
+    }
+    return null;
+  }
+  function valueOf(site, mode) { return at(site, mode, imn.t); }
   function colorOf(site, mode) {
     const v = valueOf(site, mode);
     if (v == null) return null;
@@ -214,7 +229,7 @@
   }
 
   // ----- IMN -----
-  const imn = { on: false, mode: "rain1", group: null, sites: null, cells: null, box: null };
+  const imn = { on: false, mode: "rain1", group: null, sites: null, cells: null, box: null, t: null };
 
   function popupIMN(site) {
     const st = STATUS[site.status];
@@ -248,9 +263,10 @@
     });
     imn.sites.forEach((site) => {
       const v = valueOf(site, mode), c = colorOf(site, mode);
+      const ok = imn.t == null ? site.status === "al-dia" : v != null;
       const m = L.circleMarker([site.lat, site.lon], {
         pane: "redimn", renderer: rendIMN, bubblingMouseEvents: false, radius: site.members.length > 1 ? 6.5 : 5,
-        fillColor: c || "#ffffff", fillOpacity: 1, color: site.status === "al-dia" ? "#173247" : "#8796a3", weight: site.status === "al-dia" ? 1.6 : 1.2, dashArray: site.status === "al-dia" ? null : "2 2",
+        fillColor: c || "#ffffff", fillOpacity: 1, color: ok ? "#173247" : "#8796a3", weight: ok ? 1.6 : 1.2, dashArray: ok ? null : "2 2",
       });
       m.bindTooltip(`${labelOf(v, mode)}`, { permanent: true, direction: "right", offset: [6, 0], className: "est-lbl" });
       m.bindPopup(() => popupIMN(site), { maxWidth: 320, className: "pop-est" });
@@ -279,6 +295,27 @@
     imn.sites.forEach((s, i) => { s.area = areaKm2(imn.cells[i]); });
   }
 
+  // Horas con datos (últimas 24) → fila en la línea de tiempo
+  function hoursOf(list) {
+    const cnt = new Map();
+    const from = Date.now() - 24.5 * H1;
+    list.forEach((m) => (m.rows || []).forEach(([t]) => { if (t >= from) { const h = Math.round(t / H1) * H1; cnt.set(h, (cnt.get(h) || 0) + 1); } }));
+    const max = Math.max(1, ...cnt.values());
+    return [...cnt.entries()].filter(([, n]) => n >= Math.max(3, max * 0.3)).map(([t]) => t);
+  }
+  function registerIMN() {
+    const members = imn.sites.flatMap((x) => x.members);
+    const times = hoursOf(members);
+    const latest = Math.max(...times);
+    const wet = new Map(times.map((t) => [t, members.filter((m) => { const r = m.rows && near10(m.rows, t); return r && r[1] >= 0.5; }).length]));
+    const maxWet = Math.max(1, ...wet.values());
+    C.time.register("redimn", {
+      label: "Estaciones automáticas del IMN", short: "IMN estaciones", icon: C.icon("station"), order: 2, times, tol: 35 * 60000, step: H1,
+      value: (t) => wet.get(t) / maxWet,
+      show: (t) => { imn.t = t >= latest ? null : t; drawIMN(); },
+    });
+  }
+
   function modeButtons(cur) {
     return `<div class="seg red-seg" role="radiogroup" aria-label="Valor que colorea las áreas">${Object.entries(MODES).map(([k, m]) => `<button type="button" role="radio" data-rm="${k}" aria-checked="${k === cur}">${m.label}</button>`).join("")}</div>`;
   }
@@ -301,11 +338,12 @@
         drawIMN();
       });
     }
-    if (!on) { if (imn.group) map.removeLayer(imn.group); return; }
+    if (!on) { if (imn.group) map.removeLayer(imn.group); C.time.unregister("redimn"); imn.t = null; return; }
     try {
       if (!imn.sites || Date.now() - (imn.at || 0) > 10 * 60000) { await loadIMN(); imn.at = Date.now(); }
       drawIMN();
       $(".red-sum", extra).innerHTML = imnSummary();
+      registerIMN();
     } catch (e) {
       console.error("red IMN", e);
       $(".red-sum", extra).innerHTML = `<p class="stamp">No se pudieron cargar las estaciones del IMN.</p>`;
@@ -313,48 +351,105 @@
   };
 
   // ----- Panamá (IMHPA) -----
-  const pa = { on: false, group: null, sites: null, cells: null };
+  const pa = { on: false, group: null, sites: null, cells: null, t: null };
+  const PA_VARS = [
+    ["temp", "Temperatura", (v) => `${C.fmtNum1.format(v)} °C`],
+    ["hr", "Humedad relativa", (v) => `${C.fmtNum.format(v)} %`],
+    ["viento", "Viento", (v) => `${C.fmtNum.format(v * 3.6)} km/h`],
+    ["dir", "Dirección del viento", (v) => `${cardinal(v)} (${C.fmtNum.format(v)}°)`],
+    ["rafaga", "Ráfaga", (v) => `${C.fmtNum.format(v * 3.6)} km/h`],
+    ["pres", "Presión en la estación", (v) => `${C.fmtNum1.format(v)} hPa`],
+    ["rad", "Radiación solar", (v) => `${C.fmtNum.format(v)} W/m²`],
+  ];
+  function paValue(s) {
+    if (pa.t == null) return s.rows.length ? C.stations.accum(s, 24, s.rows[0][0]) ?? s.mm : s.mm;
+    if (!s.rows.length || !near10(s.rows, pa.t)) return null;
+    return C.stations.accum(s, 24, pa.t);
+  }
+  function popupPA(s) {
+    const v = s.v || {};
+    let rows = "";
+    if (s.rows.length) {
+      const t = s.rows[0][0];
+      rows += `<tr><td>Lluvia última hora / 6 h / 24 h</td><td><b>${C.fmtNum1.format(s.rows[0][1])}</b> / ${C.fmtNum1.format(C.stations.accum(s, 6, t) || 0)} / ${C.fmtNum1.format(C.stations.accum(s, 24, t) || 0)} mm</td></tr>`;
+    } else if (s.mm != null) rows += `<tr><td>Lluvia de las últimas 24 horas</td><td><b>${C.fmtNum1.format(s.mm)}</b> mm</td></tr>`;
+    PA_VARS.forEach(([k, label, f]) => { if (v[k] && v[k][0] != null) rows += `<tr><td>${label}</td><td><b>${f(v[k][0])}</b></td></tr>`; });
+    return `<div class="pop"><div class="pop-head">${ICON_PA}<div><b>${esc(s.n.replace(/\s*\([\d-]+\)$/, ""))}</b><div class="pop-meta">IMHPA · Panamá · <span class="st st-${s.fresh ? "al-dia" : "atrasada"}">${s.fresh ? "Al día" : "Sin datos recientes"}</span></div></div></div>
+      <div class="pop-time">Dato de ${fmtTime(s.rows.length ? s.rows[0][0] : s.time)}</div>
+      <table class="pop-vals">${rows}</table>
+      <div class="pop-foot">Área de influencia: ${C.fmtNum.format(s.area)} km²${s.dCR != null && s.dCR < 40 ? ` · a ${C.fmtNum.format(s.dCR)} km de Costa Rica` : ""}<br>Fuente: IMHPA (Ley 209 de 2021).</div></div>`;
+  }
+  const RIO_ICON = (lvl) => L.divIcon({ className: "rio-ico", html: `<span title="Nivel del río">${lvl}</span>`, iconSize: null });
   function drawPA() {
     if (pa.group) map.removeLayer(pa.group);
     if (!pa.on || !pa.sites) return;
     const g = L.layerGroup();
     const p = MODES.rain24.p;
+    const vals = pa.sites.map(paValue);
     pa.sites.forEach((s, i) => {
-      const c = s.fresh && s.mm != null ? C.bandColor(p, s.mm) || DRY : null;
+      const c = vals[i] != null && (pa.t != null || s.fresh) ? C.bandColor(p, vals[i]) || DRY : null;
       if (pa.cells[i]) L.polygon(pa.cells[i], { pane: "redpa", renderer: rendPA, interactive: false, fillColor: c || "#9aa7b2", fillOpacity: c ? 0.62 : 0.12, color: "#ffffff", weight: 0.9, opacity: 0.9, dashArray: c ? null : "3 3" }).addTo(g);
     });
-    pa.sites.forEach((s) => {
-      const c = s.fresh && s.mm != null ? C.bandColor(p, s.mm) || DRY : null;
-      const m = L.circleMarker([s.lat, s.lon], { pane: "redpa", renderer: rendPA, bubblingMouseEvents: false, radius: 5, fillColor: c || "#fff", fillOpacity: 1, color: s.fresh ? "#173247" : "#8796a3", weight: 1.6, dashArray: s.fresh ? null : "2 2" });
-      m.bindTooltip(s.mm != null ? C.fmtNum1.format(s.mm) : "–", { permanent: true, direction: "right", offset: [6, 0], className: "est-lbl" });
+    pa.sites.forEach((s, i) => {
+      const ok = vals[i] != null && (pa.t != null || s.fresh);
+      const c = ok ? C.bandColor(p, vals[i]) || DRY : null;
+      const m = L.circleMarker([s.lat, s.lon], { pane: "redpa", renderer: rendPA, bubblingMouseEvents: false, radius: 5, fillColor: c || "#fff", fillOpacity: 1, color: ok ? "#173247" : "#8796a3", weight: 1.6, dashArray: ok ? null : "2 2" });
+      m.bindTooltip(vals[i] != null ? C.fmtNum1.format(vals[i]) : "–", { permanent: true, direction: "right", offset: [6, 0], className: "est-lbl" });
       hoverLabel(m);
-      m.bindPopup(() => `<div class="pop"><div class="pop-head">${ICON_PA}<div><b>${esc(s.n)}</b><div class="pop-meta">IMHPA · Panamá · <span class="st st-${s.fresh ? "al-dia" : "atrasada"}">${s.fresh ? "Al día" : "Sin datos recientes"}</span></div></div></div>
-        <div class="pop-time">Dato de ${fmtTime(s.time)}</div>
-        <table class="pop-vals"><tr><td>Lluvia de las últimas 24 horas</td><td><b>${s.mm != null ? C.fmtNum1.format(s.mm) : "–"}</b> mm</td></tr></table>
-        <div class="pop-foot">Área de influencia: ${C.fmtNum.format(s.area)} km² · Panamá publica solo el acumulado de 24 horas.<br>Fuente: IMHPA (Ley 209 de 2021).</div></div>`, { maxWidth: 300, className: "pop-est" });
+      m.bindPopup(() => popupPA(s), { maxWidth: 320, className: "pop-est" });
       m.addTo(g);
+    });
+    // Niveles de ríos y embalses
+    (pa.rios || []).forEach(([n, lat, lon, v, unit, iso]) => {
+      const embalse = /msnm/i.test(unit || "");
+      const txt = v == null ? "–" : `${C.fmtNum1.format(v)} ${embalse ? "msnm" : "m"}`;
+      L.marker([lat, lon], { pane: "redpa", icon: RIO_ICON(txt), bubblingMouseEvents: false })
+        .bindPopup(`<div class="pop"><div class="pop-head"><span class="pop-ico">${C.icon("wave")}</span><div><b>${esc(n.replace(/\s*\([\d-]+\)$/, ""))}</b><div class="pop-meta">IMHPA · ${embalse ? "nivel de embalse" : "nivel del río"}</div></div></div>
+          <div class="pop-time">Dato de ${fmtTime(iso ? Date.parse(iso) : null)}</div>
+          <table class="pop-vals"><tr><td>${embalse ? "Nivel del embalse" : "Nivel del río"}</td><td><b>${txt}</b></td></tr></table>
+          <div class="pop-foot">Fuente: IMHPA (Ley 209 de 2021).</div></div>`, { maxWidth: 300, className: "pop-est" })
+        .addTo(g);
     });
     pa.group = g.addTo(map);
   }
+  // Distancia aproximada a Costa Rica (frontera como línea recta de Sixaola a Punta Burica)
+  const B1 = toXY(9.57, -82.56), B2 = toXY(8.03, -82.89);
+  function distCR(lat, lon) {
+    const [x, y] = toXY(lat, lon), [ax, ay] = B1, [bx, by] = B2;
+    const t = clamp01(((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2));
+    return Math.hypot(x - (ax + t * (bx - ax)), y - (ay + t * (by - ay)));
+  }
+  function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+
   C.ext.redpa = async (on, box) => {
     pa.on = on;
     const extra = $(".layer-extra", box);
     if (on && !extra.dataset.ready) {
       extra.dataset.ready = "1";
       extra.insertAdjacentHTML("afterbegin", `<div class="red-legend">${C.legendHTML(MODES.rain24.p)}</div><p class="stamp pa-stamp">Cargando estaciones de Panamá…</p>
-        <p class="layer-desc">Occidente de Panamá. El IMHPA publica la lluvia acumulada de 24 horas; entra en la superficie de 24 horas de la capa de lluvia por estaciones.</p>`);
+        <p class="layer-desc">Áreas coloreadas con la lluvia de 24 horas. Toca una estación para ver todas sus variables; los rótulos azules son niveles de ríos y embalses. Su lluvia por hora entra en la superficie horaria y en el índice.</p>`);
     }
-    if (!on) { if (pa.group) map.removeLayer(pa.group); return; }
+    if (!on) { if (pa.group) map.removeLayer(pa.group); C.time.unregister("redpa"); pa.t = null; return; }
     try {
       const data = await C.stations.load();
       const now = Date.now();
-      pa.sites = data.pa.map((s) => ({ ...s, fresh: s.time && now - s.time <= 6 * H1 }));
+      pa.sites = data.pa.map((s) => Object.assign(s, { fresh: (s.rows.length ? s.rows[0][0] : s.time) && now - (s.rows.length ? s.rows[0][0] : s.time) <= 6 * H1, dCR: distCR(s.lat, s.lon) }));
+      pa.rios = data.rios;
       pa.cells = cells(pa.sites);
       pa.sites.forEach((s, i) => { s.area = areaKm2(pa.cells[i]); });
       drawPA();
-      const nf = pa.sites.filter((s) => s.fresh).length;
-      $(".pa-stamp", box).textContent = `${pa.sites.length} estaciones, ${nf} con dato de las últimas 6 horas.`;
+      const nf = pa.sites.filter((s) => s.fresh).length, nh = pa.sites.filter((s) => s.rows.length).length, nb = pa.sites.filter((s) => s.dCR < 40).length;
+      $(".pa-stamp", box).textContent = `${pa.sites.length} estaciones (${nb} a menos de 40 km de Costa Rica), ${nf} al día, ${nh} con lluvia por hora, y ${pa.rios.length} niveles de ríos y embalses.`;
+      const times = hoursOf(pa.sites);
+      if (times.length) {
+        const latest = Math.max(...times);
+        C.time.register("redpa", {
+          label: "Estaciones de Panamá (IMHPA)", short: "IMHPA estaciones", icon: C.icon("station"), order: 4, times, tol: 35 * 60000, step: H1,
+          show: (t) => { pa.t = t >= latest ? null : t; drawPA(); },
+        });
+      }
     } catch (e) {
+      console.error("red PA", e);
       $(".pa-stamp", box).textContent = "No se pudieron cargar las estaciones de Panamá.";
     }
   };

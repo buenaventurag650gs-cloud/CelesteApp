@@ -329,34 +329,54 @@
   };
   const chip = (k) => { const s = SOURCES[k]; return s ? `<span class="src ${s.cls}" title="${s.title}">${s.name}${s.cc ? `<i>${s.cc}</i>` : ""}</span>` : ""; };
 
+  // Lluvia estimada por la temperatura de los topes de nube (auto-estimador de Vicente et al., 1998):
+  // nubes con topes por debajo de −32 °C se asocian a lluvia convectiva, más intensa cuanto más frías.
+  const goesRain = (c) => {
+    if (!Number.isFinite(c)) return 0;
+    const k = c + 273.15;
+    if (k > 241) return 0;
+    return Math.min(72, 1.1183e11 * Math.exp(-3.6382e-2 * Math.pow(k, 1.2)));
+  };
+  const CR_AREA = [7.4, -86.8, 11.8, -81.8];
+
+  // Jerarquía: categoría (tipo de dato) → capa oficial (dato crudo, con su fuente) → capas derivadas.
+  // idx: la capa entra en el índice CELESTE. time: la capa tiene fila en la línea de tiempo.
   const GROUPS = [
     {
-      title: "Fuentes del índice CELESTE",
-      note: "Datos medidos en Nicaragua, Costa Rica y Panamá.",
-      core: true,
+      title: "Radares",
+      icon: "radar",
       layers: [
-        { key: "radar", type: "radar", icon: "radar", src: "cocesna", name: "Radar de lluvia de COCESNA", desc: "Cada 10 minutos. Cubre el norte y el centro del país.", on: true, opacity: 0.8, pal: "rain" },
-        { key: "radarimn", type: "ext", icon: "radar", src: "imn", pane: "radarimn", name: "Radar del IMN (Valle Central)", desc: "Aranjuez. Misma unidad, escala y suavizado que el de COCESNA.", opacity: 0.8 },
-        { key: "redimn", type: "ext", icon: "station", src: "imn", pane: "redimn", name: "Estaciones automáticas del IMN", desc: "Las 153 estaciones, su área de influencia y lo que reportan.", opacity: 1 },
-        { key: "estaciones", type: "ext", icon: "surface", src: "imn", pane: "estaciones", name: "Lluvia de estaciones, hora a hora ±6 h", desc: "Lo medido por las estaciones, trasladado a una superficie continua, y su pronóstico.", opacity: 0.85 },
-        { key: "redpa", type: "ext", icon: "station", src: "imhpa", pane: "redpa", name: "Estaciones de Panamá", desc: "Occidente de Panamá, lluvia de 24 horas y área de influencia.", opacity: 1 },
+        { key: "radar", type: "radar", icon: "radar", src: "cocesna", idx: true, time: true, name: "Radar regional", desc: "Lluvia del radar de COCESNA cada 10 minutos. Cubre el norte y el centro del país.", on: true, opacity: 0.8, pal: "rain" },
+        { key: "radarimn", type: "ext", icon: "radar", src: "imn", idx: "pausa", pane: "radarimn", name: "Radar del Valle Central", desc: "Radar del IMN en Aranjuez. Misma unidad, escala y suavizado que el de COCESNA.", opacity: 0.8 },
       ],
     },
     {
-      title: "Lluvia por satélite",
-      more: true,
+      title: "Estaciones",
+      icon: "station",
       layers: [
-        { key: "imerg30", type: "field", icon: "drop", src: "nasa", id: "IMERG_Precipitation_Rate_30min", name: "Lluvia estimada por satélite", desc: "IMERG, cada 30 minutos con unas horas de retraso. Cubre todo el país.", opacity: 0.75, pal: "rain", srcWidth: 124, sigma: 6 },
+        {
+          key: "redimn", type: "ext", icon: "station", src: "imn", idx: true, time: true, pane: "redimn", name: "Estaciones automáticas", desc: "Las 153 estaciones: ubicación, área de influencia y todo lo que reportan cada hora.", opacity: 1,
+          children: [
+            { key: "estaciones", type: "ext", icon: "surface", from: ["imn", "imhpa"], idx: true, time: true, pane: "estaciones", name: "Lluvia hora a hora ±6 h", desc: "Lo medido en las estaciones, interpolado a una superficie continua, y su pronóstico corregido.", opacity: 0.85 },
+          ],
+        },
+        { key: "redpa", type: "ext", icon: "station", src: "imhpa", idx: true, time: true, pane: "redpa", name: "Estaciones de Panamá y la frontera sur", desc: "Occidente de Panamá: lluvia por hora, temperatura, humedad, viento, presión y niveles de ríos. Informan la zona sur de Costa Rica.", opacity: 1 },
+      ],
+    },
+    {
+      title: "Satélite",
+      icon: "satellite",
+      layers: [
+        {
+          key: "ir", type: "tiles", icon: "cloud", src: "noaa", time: true, tStep: 10, window: 4, id: "GOES-East_ABI_Band13_Clean_Infrared", level: 6, name: "Nubes por temperatura (GOES-Este)", desc: "Infrarrojo cada 10 minutos. Los topes más fríos son las tormentas más altas.", opacity: 0.7,
+          children: [
+            { key: "goesrain", type: "field", icon: "drop", from: ["noaa"], idx: true, time: true, tStep: 10, window: 4, id: "GOES-East_ABI_Band13_Clean_Infrared", conv: goesRain, area: CR_AREA, name: "Lluvia estimada por nubes frías", desc: "Se deriva de la temperatura de los topes: más fríos, lluvia más intensa. Cubre todo el país.", opacity: 0.75, pal: "rain", srcWidth: 330, sigma: 1.6 },
+          ],
+        },
+        { key: "imerg30", type: "field", icon: "drop", src: "nasa", idx: true, time: true, tStep: 30, window: 12, id: "IMERG_Precipitation_Rate_30min", name: "Lluvia estimada IMERG", desc: "NASA, cada 30 minutos con unas 5 horas de retraso. Cubre todo el país y el mar.", opacity: 0.75, pal: "rain", srcWidth: 124, sigma: 6 },
+        { key: "geocolor", type: "tiles", icon: "satellite", src: "noaa", time: true, tStep: 10, window: 4, id: "GOES-East_ABI_GeoColor", level: 7, name: "Satélite en color real", desc: "GOES-Este cada 10 minutos. De noche muestra luces y nubes bajas.", opacity: 0.9 },
         { key: "imergday", type: "field", icon: "drop", src: "nasa", id: "IMERG_Precipitation_Rate", name: "Lluvia del último día", desc: "IMERG, total del día anterior.", opacity: 0.75, pal: "rainDay", srcWidth: 124, sigma: 6, scale: 24 },
-      ],
-    },
-    {
-      title: "Nubes",
-      more: true,
-      layers: [
-        { key: "geocolor", type: "tiles", icon: "satellite", src: "noaa", id: "GOES-East_ABI_GeoColor", level: 7, name: "Satélite en color real", desc: "GOES-Este, imagen más reciente. De noche muestra luces y nubes bajas.", opacity: 0.9 },
-        { key: "ir", type: "tiles", icon: "cloud", src: "noaa", id: "GOES-East_ABI_Band13_Clean_Infrared", level: 6, name: "Nubes por temperatura", desc: "GOES-Este infrarrojo. Los topes más fríos son las tormentas más altas.", opacity: 0.7 },
-        { key: "dust", type: "tiles", icon: "dust", src: "noaa", id: "GOES-East_ABI_Dust", level: 7, name: "Polvo del Sahara", desc: "GOES-Este. El polvo aparece en tonos rosados.", opacity: 0.75 },
+        { key: "dust", type: "tiles", icon: "dust", src: "noaa", time: true, tStep: 10, window: 4, id: "GOES-East_ABI_Dust", level: 7, name: "Polvo del Sahara", desc: "GOES-Este. El polvo aparece en tonos rosados.", opacity: 0.75 },
       ],
     },
     {
@@ -380,7 +400,8 @@
     },
   ];
 
-  const ALL = GROUPS.flatMap((g) => g.layers);
+  const ALL = GROUPS.flatMap((g) => g.layers.flatMap((l) => [l, ...(l.children || [])]));
+  ALL.forEach((d) => { (d.children || []).forEach((c) => (c.parent = d)); });
   let zBase = 410;
   ALL.forEach((def) => {
     if (def.type === "field" || def.type === "radar") {
@@ -403,52 +424,155 @@
   }
 
   // ---------- Capas de datos de GIBS ----------
-  const fields = new Map(); // key -> {grid,w,h,bbox,layer,def}
+  const fields = new Map(); // key -> {grid,w,h,bbox,layer,def,time}
+  const TL = () => window.CelesteTime;
+  const isoMin = (t) => new Date(t).toISOString().slice(0, 19) + "Z";
+  const setOff = (el, off) => { if (el) el.classList.toggle("td-fuera", !!off); };
 
-  async function loadField(def, box) {
-    const stamp = $(".stamp", box);
-    stamp.textContent = "Procesando la capa…";
-    const [s, w, n, e] = FIELD_AREA;
+  // Imagen de GIBS decodificada a valores (por capa, hora y área), con caché
+  const decoded = new Map();
+  function gibsDecoded(def, time) {
+    const [s, w, n, e] = def.area || FIELD_AREA;
     const src = extent(s, w, n, e, def.srcWidth);
-    const tgt = extent(s, w, n, e, 620);
-    try {
-      const [lk, img] = await Promise.all([
-        gibsLookup(def.id),
-        readPixels(`/api/gibs/mapa?capa=${def.id}&bbox=${src.bbox.map((v) => v.toFixed(1)).join(",")}&ancho=${src.w}&alto=${src.h}`),
-      ]);
-      const p = PAL[def.pal];
+    const key = `${def.id}|${def.key}|${time || ""}`;
+    if (decoded.has(key)) return decoded.get(key);
+    const url = `/api/gibs/mapa?capa=${def.id}&bbox=${src.bbox.map((v) => v.toFixed(1)).join(",")}&ancho=${src.w}&alto=${src.h}${time ? `&hora=${time}` : ""}`;
+    const prom = Promise.all([gibsLookup(def.id), readPixels(url)]).then(([lk, img]) => {
       const isRain = def.pal.startsWith("rain");
       const raw = new Float32Array(img.w * img.h);
       let found = 0;
       for (let i = 0, j = 0; i < raw.length; i++, j += 4) {
         let v = NaN;
         if (img.px[j + 3] > 0) {
-          const key = (img.px[j] << 16) | (img.px[j + 1] << 8) | img.px[j + 2];
-          if (lk.map.has(key)) { v = lk.map.get(key); found++; }
+          const k = (img.px[j] << 16) | (img.px[j + 1] << 8) | img.px[j + 2];
+          if (lk.map.has(k)) { v = lk.map.get(k); found++; }
         }
         if (Number.isFinite(v)) {
           if (lk.kelvin && v > 150) v -= 273.15;
+          if (def.conv) v = def.conv(v);
           if (def.scale) v *= def.scale;
         } else if (isRain) v = 0;
         raw[i] = v;
       }
-      const up = resample(raw, img.w, img.h, tgt.w, tgt.h);
-      const grid = blur(up, tgt.w, tgt.h, def.sigma * (tgt.w / 620));
-      const geo = polygons(grid, tgt.w, tgt.h, tgt.bbox, p);
-      if (!def._on) return;
+      return { raw, w: img.w, h: img.h, bbox: src.bbox, found };
+    });
+    prom.catch(() => decoded.delete(key));
+    decoded.set(key, prom);
+    if (decoded.size > 60) decoded.delete(decoded.keys().next().value);
+    return prom;
+  }
+
+  // Remuestreo a otra rejilla (otra área), bilineal y tolerante a vacíos
+  function regrid(d, tgt) {
+    const out = new Float32Array(tgt.w * tgt.h);
+    const [x0, y0, x1, y1] = tgt.bbox, [sx0, sy0, sx1, sy1] = d.bbox;
+    for (let j = 0; j < tgt.h; j++) {
+      const Y = y1 - ((j + 0.5) / tgt.h) * (y1 - y0);
+      const fy = ((sy1 - Y) / (sy1 - sy0)) * d.h - 0.5;
+      for (let i = 0; i < tgt.w; i++) {
+        const X = x0 + ((i + 0.5) / tgt.w) * (x1 - x0);
+        const fx = ((X - sx0) / (sx1 - sx0)) * d.w - 0.5;
+        const ix = Math.floor(fx), iy = Math.floor(fy), ux = fx - ix, uy = fy - iy;
+        let s = 0, ws = 0;
+        for (const [dx, dy, wt] of [[0, 0, (1 - ux) * (1 - uy)], [1, 0, ux * (1 - uy)], [0, 1, (1 - ux) * uy], [1, 1, ux * uy]]) {
+          const xx = Math.min(d.w - 1, Math.max(0, ix + dx)), yy = Math.min(d.h - 1, Math.max(0, iy + dy));
+          const v = d.raw[yy * d.w + xx];
+          if (Number.isFinite(v)) { s += v * wt; ws += wt; }
+        }
+        out[j * tgt.w + i] = ws > 0.2 ? s / ws : NaN;
+      }
+    }
+    return out;
+  }
+  // Rejilla de una capa de GIBS sobre cualquier área (la usa el índice)
+  async function gibsGrid(key, time, tgt, sigmaKm) {
+    const def = ALL.find((d) => d.key === key);
+    const d = await gibsDecoded(def, time);
+    const g = regrid(d, tgt);
+    const kmPx = ((tgt.bbox[2] - tgt.bbox[0]) / tgt.w / 1000) * Math.cos(9.8 * Math.PI / 180);
+    return { grid: blur(g, tgt.w, tgt.h, (sigmaKm || 3) / kmPx), found: d.found };
+  }
+  async function gibsTimes(def) {
+    const r = await fetch(`/api/gibs/tiempos?capa=${encodeURIComponent(def.id)}`);
+    if (!r.ok) throw new Error("tiempos");
+    const j = await r.json();
+    const from = Date.now() - (def.window || 6) * 3600000;
+    return (j.tiempos || []).map(Date.parse).filter((t) => t >= from);
+  }
+
+  const frameCache = new Map(); // key -> Map(time -> {grid, layer})
+  async function loadField(def, box, time) {
+    const stamp = $(".stamp", box);
+    const [s, w, n, e] = def.area || FIELD_AREA;
+    const tgt = extent(s, w, n, e, 620);
+    const want = time || "";
+    def._want = want;
+    let fc = frameCache.get(def.key);
+    if (!fc) { fc = new Map(); frameCache.set(def.key, fc); }
+    try {
+      let fr = fc.get(want);
+      if (!fr) {
+        if (!fc.size) stamp.textContent = "Procesando la capa…";
+        const d = await gibsDecoded(def, time);
+        const up = resample(d.raw, d.w, d.h, tgt.w, tgt.h);
+        const grid = blur(up, tgt.w, tgt.h, def.sigma * (tgt.w / 620));
+        fr = { grid, layer: polyLayer(def, polygons(grid, tgt.w, tgt.h, tgt.bbox, PAL[def.pal])), found: d.found };
+        fc.set(want, fr);
+        if (fc.size > 30) { const k0 = fc.keys().next().value; const o = fc.get(k0); if (o.layer && map.hasLayer(o.layer)) map.removeLayer(o.layer); fc.delete(k0); }
+      }
+      if (!def._on || def._want !== want) return;
       const old = fields.get(def.key);
-      if (old?.layer) map.removeLayer(old.layer);
-      const layer = polyLayer(def, geo).addTo(map);
-      fields.set(def.key, { grid, w: tgt.w, h: tgt.h, bbox: tgt.bbox, layer, def });
-      stamp.textContent = found ? "Imagen más reciente disponible." : "No hay datos recientes sobre Costa Rica.";
+      if (old?.layer && old.layer !== fr.layer) map.removeLayer(old.layer);
+      if (!map.hasLayer(fr.layer)) fr.layer.addTo(map);
+      fields.set(def.key, { grid: fr.grid, w: tgt.w, h: tgt.h, bbox: tgt.bbox, layer: fr.layer, def, time });
+      stamp.textContent = !fr.found ? "No hay datos sobre Costa Rica en esta imagen." : time ? `Imagen de las ${fmtHour.format(new Date(time))} (${ago(new Date(time))}). Usa la línea de tiempo para ver las anteriores.` : "Imagen más reciente disponible.";
     } catch (err) {
-      stamp.textContent = "No se pudo cargar esta capa. Vuelve a intentarlo en unos minutos.";
+      if (def._want === want) stamp.textContent = "No se pudo cargar esta imagen. Vuelve a intentarlo en unos minutos.";
     }
   }
 
-  function makeTiles(def) {
+  // Capas con tiempo (campos o mosaicos): se registran en la línea de tiempo
+  const tileFrames = new Map(); // key -> Map(iso -> tileLayer)
+  async function enableTimed(def, box) {
+    let times = [];
+    try { times = await gibsTimes(def); } catch (e) { times = []; }
+    if (!def._on) return;
+    if (!times.length) { // sin lista de horas: la imagen más reciente
+      if (def.type === "field") loadField(def, box);
+      else showTile(def, null, false);
+      return;
+    }
+    const lbl = def.name.replace(/\s*\(.*\)$/, "");
+    TL().register(def.key, {
+      label: def.name, short: def.short || lbl, icon: icon(def.icon), times, tol: def.tStep * 0.6 * 60000, step: def.tStep * 60000, order: def.order || ORDER[def.key] || 50,
+      show: (t, off) => {
+        if (def.type === "field") { loadField(def, box, isoMin(t)); setOff(map.getPane(def.pane), off); }
+        else showTile(def, isoMin(t), off);
+      },
+    });
+  }
+  function showTile(def, iso, off) {
+    let fm = tileFrames.get(def.key);
+    if (!fm) { fm = new Map(); tileFrames.set(def.key, fm); }
+    const k = iso || "latest";
+    let layer = fm.get(k);
+    if (!layer) {
+      layer = makeTiles(def, iso);
+      layer.on("tileerror", () => { if (!def._warned) { def._warned = true; toast(`Algunas partes de "${def.name}" no cargaron. Puede que aún no haya imagen.`); } });
+      fm.set(k, layer);
+      if (fm.size > 8) { const k0 = fm.keys().next().value; map.removeLayer(fm.get(k0)); fm.delete(k0); }
+    }
+    if (!map.hasLayer(layer)) layer.addTo(map);
+    fm.forEach((l, kk) => l.setOpacity(kk === k ? def.opacity : 0));
+    tiles.set(def.key, layer);
+    setOff(layer.getContainer(), off);
+  }
+  const ORDER = { radar: 1, redimn: 2, estaciones: 3, redpa: 4, ir: 5, goesrain: 6, imerg30: 7, geocolor: 8, dust: 9 };
+
+  function makeTiles(def, iso) {
     if (def.type === "tiles") {
-      return L.tileLayer(GIBS_WMTS(def.id, def.level), {
+      const url = iso ? `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${def.id}/default/${iso}/GoogleMapsCompatible_Level${def.level}/{z}/{y}/{x}.png` : GIBS_WMTS(def.id, def.level);
+      return L.tileLayer(url, {
         pane: "clima", maxNativeZoom: def.level, maxZoom: 16, opacity: def.opacity, attribution: GIBS_ATTR,
         className: "imagen-suave", errorTileUrl: "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
       });
@@ -464,47 +588,66 @@
 
   const tiles = new Map();
 
+  const IDX_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"/></svg>';
+  function layerBox(def, sub) {
+    const box = document.createElement("div");
+    box.className = `layer${sub ? " sub" : ""}`;
+    box.dataset.key = def.key;
+    const id = `chk-${def.key}`;
+    const legend = def.pal ? legendHTML(PAL[def.pal]) : "";
+    const tags = [
+      sub ? `<span class="tag tag-der" title="Mapa calculado a partir de ${def.from.map((f) => SOURCES[f].name).join(" y ")}">Derivado · ${def.from.map((f) => SOURCES[f].name).join(" + ")}</span>` : chip(def.src),
+      def.idx ? `<span class="tag tag-idx${def.idx === "pausa" ? " pausa" : ""}" title="${def.idx === "pausa" ? "Entra en el índice cuando su imagen esté al día" : "Entra en el índice CELESTE"}">${IDX_ICON}Índice</span>` : "",
+      def.time ? '<span class="tag tag-time" title="Tiene línea de tiempo"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg></span>' : "",
+    ].join("");
+    box.innerHTML = `
+      <label class="layer-row" for="${id}">
+        <input type="checkbox" id="${id}">
+        <span class="layer-ico" aria-hidden="true">${icon(def.icon)}</span>
+        <span class="layer-txt"><span class="layer-name">${def.name}</span><span class="layer-tags">${tags}</span><span class="layer-desc">${def.desc}</span></span>
+      </label>
+      <div class="layer-extra">
+        ${def.type === "radar" ? productButtons() : ""}
+        ${legend}
+        ${def.noOpacity ? "" : `<div class="opacity"><span>Opacidad</span><input type="range" min="0.2" max="1" step="0.05" value="${def.opacity}" aria-label="Opacidad de ${def.name}"></div>`}
+        ${def.type === "radar" || def.type === "field" ? `<div class="stamp"${def.type === "radar" ? ' id="radarStamp"' : ""}></div>` : ""}
+      </div>`;
+    const chk = $("input[type=checkbox]", box);
+    chk.addEventListener("change", () => toggle(def, chk.checked, box));
+    const op = $(".opacity input", box);
+    if (op) op.addEventListener("input", (e) => {
+      def.opacity = parseFloat(e.target.value);
+      if (def.pane) map.getPane(def.pane).style.opacity = def.opacity;
+      else { const fm = tileFrames.get(def.key); if (fm) { const cur = tiles.get(def.key); fm.forEach((l) => l.setOpacity(l === cur ? def.opacity : 0)); } else tiles.get(def.key)?.setOpacity(def.opacity); }
+    });
+    return box;
+  }
+
   function renderPanel() {
     const wrap = $("#layerGroups");
     wrap.innerHTML = "";
     let more = null;
     GROUPS.forEach((g) => {
       const sec = document.createElement("section");
-      sec.className = `group${g.core ? " group-core" : ""}`;
-      sec.innerHTML = `<h2>${g.title}</h2>${g.note ? `<p class="group-note">${g.note}</p>` : ""}`;
+      sec.className = `group${g.more ? "" : " group-core"}`;
+      sec.innerHTML = `<h2>${g.icon ? icon(g.icon) : ""}<span>${g.title}</span></h2>`;
       g.layers.forEach((def) => {
-        const box = document.createElement("div");
-        box.className = "layer";
-        box.dataset.key = def.key;
-        const id = `chk-${def.key}`;
-        const legend = def.pal ? legendHTML(PAL[def.pal]) : "";
-        box.innerHTML = `
-          <label class="layer-row" for="${id}">
-            <input type="checkbox" id="${id}">
-            <span class="layer-ico" aria-hidden="true">${icon(def.icon)}</span>
-            <span class="layer-txt"><span class="layer-top"><span class="layer-name">${def.name}</span>${chip(def.src)}</span><span class="layer-desc">${def.desc}</span></span>
-          </label>
-          <div class="layer-extra">
-            ${def.type === "radar" ? productButtons() : ""}
-            ${legend}
-            ${def.noOpacity ? "" : `<div class="opacity"><span>Opacidad</span><input type="range" min="0.2" max="1" step="0.05" value="${def.opacity}" aria-label="Opacidad de ${def.name}"></div>`}
-            ${def.type === "radar" || def.type === "field" ? `<div class="stamp"${def.type === "radar" ? ' id="radarStamp"' : ""}></div>` : ""}
-          </div>`;
-        sec.appendChild(box);
-        const chk = $("input[type=checkbox]", box);
-        chk.addEventListener("change", () => toggle(def, chk.checked, box));
-        const op = $(".opacity input", box);
-        if (op) op.addEventListener("input", (e) => {
-          def.opacity = parseFloat(e.target.value);
-          if (def.pane) map.getPane(def.pane).style.opacity = def.opacity;
-          else tiles.get(def.key)?.setOpacity(def.opacity);
-        });
+        const fam = document.createElement("div");
+        fam.className = "family";
+        fam.appendChild(layerBox(def, false));
+        if (def.children) {
+          const kids = document.createElement("div");
+          kids.className = "children";
+          def.children.forEach((c) => kids.appendChild(layerBox(c, true)));
+          fam.appendChild(kids);
+        }
+        sec.appendChild(fam);
       });
       if (g.more) {
         if (!more) {
           more = document.createElement("details");
           more.className = "more-layers";
-          more.innerHTML = `<summary><span>Más capas</span><span class="more-hint">Satélite, mar y tierra, referencia</span></summary>`;
+          more.innerHTML = `<summary><span>Más capas</span><span class="more-hint">Mar, tierra y referencia</span></summary>`;
           wrap.appendChild(more);
         }
         more.appendChild(sec);
@@ -530,11 +673,17 @@
     if (def.type === "radar") { on ? radar.enable() : radar.disable(); return; }
     if (def.type === "ext") { window.Celeste.ext?.[def.key]?.(on, box); return; }
     if (def.type === "field") {
-      if (on) loadField(def, box);
-      else { const f = fields.get(def.key); if (f?.layer) map.removeLayer(f.layer); fields.delete(def.key); }
+      if (on) { if (def.time) enableTimed(def, box); else loadField(def, box); }
+      else {
+        TL().unregister(def.key);
+        const f = fields.get(def.key); if (f?.layer) map.removeLayer(f.layer); fields.delete(def.key);
+        const fc = frameCache.get(def.key); if (fc) fc.forEach((fr) => fr.layer && map.removeLayer(fr.layer));
+        setOff(map.getPane(def.pane), false);
+      }
       return;
     }
     if (on) {
+      if (def.time) { enableTimed(def, box); return; }
       const layer = makeTiles(def);
       layer.on("tileerror", () => {
         if (!layer._warned) { layer._warned = true; toast(`Algunas partes de "${def.name}" no cargaron. Puede que aún no haya imagen reciente.`); }
@@ -542,6 +691,9 @@
       layer.addTo(map);
       tiles.set(def.key, layer);
     } else {
+      TL().unregister(def.key);
+      const fm = tileFrames.get(def.key);
+      if (fm) { fm.forEach((l) => map.removeLayer(l)); tileFrames.delete(def.key); }
       const l = tiles.get(def.key);
       if (l) map.removeLayer(l);
       tiles.delete(def.key);
@@ -561,12 +713,9 @@
     let enabled = false;
     let frames = []; // {time, geo, layer, grid, cover, loaded}
     let idx = -1;
-    let timer = null, refresh = null;
+    let refresh = null;
     let gen = 0;
 
-    const tl = $("#timeline");
-    const bars = $("#tlBars");
-    const btnPlay = $("#btnPlay");
     const setStamp = (t) => { const el = $("#radarStamp"); if (el) el.textContent = t; };
 
     // dBZ → mm/h (Marshall-Palmer, Z = 200 R^1.6)
@@ -596,32 +745,20 @@
       drawBars();
     }
 
+    // Fila del radar en la línea de tiempo (altura = área con lluvia)
     function drawBars() {
-      bars.innerHTML = "";
+      if (!enabled || !frames.length) return;
       const covers = frames.filter((f) => f.loaded).map((f) => f.cover || 0);
       const max = Math.max(0.002, ...covers);
-      const lo = covers.length ? Math.min(...covers) * 0.7 : 0;
-      frames.forEach((f, i) => {
-        const b = document.createElement("span");
-        b.className = "tl-bar" + (f.loaded ? "" : " loading") + (i === idx ? " current" : "");
-        const k = max > lo ? ((f.cover || 0) - lo) / (max - lo) : 1;
-        b.style.height = f.loaded ? `${6 + 28 * Math.max(0, k)}px` : "4px";
-        b.title = f.loaded ? `${fmtHour.format(new Date(f.time))}: lluvia en ${fmtNum1.format((f.cover || 0) * 100)} % del área del radar` : "Procesando…";
-        bars.appendChild(b);
-      });
-      bars.setAttribute("aria-valuemax", String(Math.max(0, frames.length - 1)));
-    }
-
-    function label(i) {
-      const f = frames[i];
-      if (!f) return;
-      const d = new Date(f.time);
-      $("#tlTime").textContent = (isToday(d) ? "" : fmtDay.format(d) + ", ") + fmtHour.format(d);
-      $("#tlAgo").textContent = ago(d);
-      bars.setAttribute("aria-valuenow", String(i));
-      bars.setAttribute("aria-valuetext", `${fmtHour.format(d)}, ${ago(d)}`);
-      $("#tlStart").textContent = fmtHour.format(new Date(frames[0].time));
-      $("#tlEnd").textContent = fmtHour.format(new Date(frames[frames.length - 1].time));
+      const byT = new Map(frames.map((f) => [Date.parse(f.time), f]));
+      const def = {
+        label: "Radar regional (COCESNA)", short: "Radar", icon: icon("radar"), order: 1,
+        times: [...byT.keys()], tol: 6 * 60000, step: 10 * 60000,
+        value: (t) => { const f = byT.get(t); return f && f.loaded ? (f.cover || 0) / max : 0.05; },
+        show: (t, off) => { const i = frames.findIndex((f) => Date.parse(f.time) === t); if (i >= 0) show(i); setOff(map.getPane(radarDef.pane), off); },
+      };
+      if (!window.CelesteTime.has("radar")) window.CelesteTime.register("radar", def);
+      else { window.CelesteTime.register("radar", def); }
     }
 
     function show(i) {
@@ -632,8 +769,6 @@
       const cur = frames[idx];
       if (cur.layer && !map.hasLayer(cur.layer)) cur.layer.addTo(map);
       if (prev && prev !== cur && prev.layer) map.removeLayer(prev.layer);
-      [...bars.children].forEach((b, j) => b.classList.toggle("current", j === idx));
-      label(idx);
     }
 
     function clearFrames() {
@@ -649,65 +784,29 @@
         const data = await r.json();
         const times = (data.capas[product] || []).slice(-FRAMES);
         if (!times.length) throw new Error("sin imágenes");
-        const atEnd = idx === frames.length - 1;
         if (!keepPosition) { gen++; clearFrames(); }
         const known = new Set(frames.map((f) => f.time));
         const fresh = [];
         times.forEach((t) => { if (!known.has(t)) { const f = { time: t, loaded: false, cover: 0 }; frames.push(f); fresh.push(f); } });
         while (frames.length > FRAMES) { const old = frames.shift(); if (old.layer) map.removeLayer(old.layer); if (idx > 0) idx--; }
+        if (idx < 0) idx = frames.length - 1;
         drawBars();
-        if (!keepPosition || atEnd) show(frames.length - 1);
         // La imagen más reciente primero, para que se vea de inmediato
         const myGen = gen;
         fresh.reverse().forEach((f) => build(f, myGen));
         const last = new Date(frames[frames.length - 1].time);
-        setStamp(`Última imagen: ${fmtHour.format(last)} (${ago(last)}).`);
-        tl.hidden = false;
+        setStamp(`Última imagen: ${fmtHour.format(last)} (${ago(last)}). Usa la línea de tiempo de abajo para ver las 3 horas anteriores.`);
       } catch (e) {
         setStamp("El radar de COCESNA no respondió. Vuelve a intentarlo en unos minutos.");
         if (!keepPosition) toast("No se pudo cargar el radar de COCESNA en este momento.");
       }
     }
 
-    function play() {
-      if (timer || frames.length < 2) return;
-      btnPlay.classList.add("playing");
-      btnPlay.setAttribute("aria-label", "Pausar animación del radar");
-      const step = () => {
-        const next = idx >= frames.length - 1 ? 0 : idx + 1;
-        show(next);
-        timer = setTimeout(step, next === frames.length - 1 ? 1600 : 450);
-      };
-      timer = setTimeout(step, 200);
-    }
-    function pause() {
-      clearTimeout(timer); timer = null;
-      btnPlay.classList.remove("playing");
-      btnPlay.setAttribute("aria-label", "Reproducir animación del radar");
-    }
-    btnPlay.addEventListener("click", () => (timer ? pause() : play()));
-
-    function pick(e) {
-      const r = bars.getBoundingClientRect();
-      pause();
-      show(Math.floor(((e.clientX - r.left) / r.width) * frames.length));
-    }
-    let dragging = false;
-    bars.addEventListener("pointerdown", (e) => { dragging = true; bars.setPointerCapture(e.pointerId); pick(e); });
-    bars.addEventListener("pointermove", (e) => { if (dragging) pick(e); });
-    bars.addEventListener("pointerup", () => (dragging = false));
-    bars.addEventListener("keydown", (e) => {
-      if (e.key === "ArrowLeft") { pause(); show(idx - 1); e.preventDefault(); }
-      if (e.key === "ArrowRight") { pause(); show(idx + 1); e.preventDefault(); }
-      if (e.key === " ") { timer ? pause() : play(); e.preventDefault(); }
-    });
-
     document.addEventListener("click", (e) => {
       const b = e.target.closest("[data-prod]");
       if (!b || b.dataset.prod === product) return;
       document.querySelectorAll("[data-prod]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
       product = b.dataset.prod;
-      pause();
       if (enabled) load(false);
     });
 
@@ -723,10 +822,10 @@
         enabled = false;
         map.attributionControl.removeAttribution(RADAR_ATTR);
         gen++;
-        pause();
         clearInterval(refresh);
         clearFrames();
-        tl.hidden = true;
+        window.CelesteTime.unregister("radar");
+        setOff(map.getPane(radarDef.pane), false);
       },
       current() {
         const f = frames[idx];
@@ -992,7 +1091,7 @@
   window.Celeste = {
     map, $, PAL, ramp, steps, extent, merc, unmerc, resample, blur, polygons, legendHTML, bandColor,
     readPixels, fmtHour, fmtDay, fmtNum, fmtNum1, fmtNum2, ago, icon, isToday, toast, openPoint, closePoint, wireTips,
-    RADAR_AREA, radarRain, pointHooks: [], ext: {},
+    RADAR_AREA, radarRain, gibsGrid, gibsTimes: (key, hours) => gibsTimes(Object.assign({}, ALL.find((d) => d.key === key), hours ? { window: hours } : {})), time: window.CelesteTime, setOff, SOURCES, pointHooks: [], ext: {},
   };
   setBase(baseKey);
   renderPanel();

@@ -30,6 +30,19 @@
         fetch("/api/estaciones/panama").then((r) => r.json()).catch(() => ({ estaciones: [] })),
         fetch("/api/estaciones/aeropuertos").then((r) => r.json()).catch(() => ({ aeropuertos: [] })),
       ]);
+      // Panamá (IMHPA): serie horaria de lluvia de cada estación (lotes de 12 por el límite de subconsultas)
+      const paList = (pa.estaciones || []).map(([n, lat, lon, mm, iso, v, id]) => ({ n, lat, lon, mm, time: iso ? Date.parse(iso) : null, v: v || {}, id, q: 1, src: "IMHPA", rows: [] }));
+      const paIds = paList.filter((s) => s.id && s.v.lluvia);
+      const paChunks = [];
+      for (let i = 0; i < paIds.length; i += 12) paChunks.push(paIds.slice(i, i + 12));
+      const paSeries = await Promise.all(paChunks.map((c) => fetch(`/api/estaciones/panama/serie?e=${c.map((s) => s.id).join(",")}`).then((r) => r.json()).catch(() => ({ estaciones: {} }))));
+      const paById = new Map(paList.map((s) => [s.id, s]));
+      paSeries.forEach((b) => Object.entries(b.estaciones || {}).forEach(([id, d]) => {
+        const s = paById.get(id);
+        if (!s || !d.filas) return;
+        const tp = s.v.temp ? s.v.temp[0] : null;
+        s.rows = d.filas.map(([iso, r], i) => [Date.parse(iso), r, i === 0 ? tp : null]).filter((x) => Number.isFinite(x[0])).sort((a, b) => b[0] - a[0]);
+      }));
       const byT = new Map(list.map((s) => [s.t, s]));
       batches.forEach((b) => Object.entries(b.estaciones || {}).forEach(([t, d]) => {
         const s = byT.get(t);
@@ -45,9 +58,12 @@
       cache = {
         all,
         imn: list.filter((s) => s.rows.length),
-        pa: (pa.estaciones || []).map(([n, lat, lon, mm, iso]) => ({ n, lat, lon, mm, time: iso ? Date.parse(iso) : null })),
+        pa: paList,
+        rios: pa.rios || [],
         air: air.aeropuertos || [],
       };
+      // Estaciones con lluvia por hora (IMN y Panamá): alimentan la superficie horaria y el índice
+      cache.hourly = cache.imn.map((s) => Object.assign(s, { src: "IMN" })).concat(paList.filter((s) => s.rows.length));
       cacheAt = Date.now();
       loading = null;
       return cache;
@@ -184,15 +200,16 @@
     const now = Date.now();
     const pts = [];
     let nImn = 0, nPa = 0;
-    data.imn.forEach((s) => {
+    data.hourly.forEach((s) => {
       const latest = s.rows[0] && s.rows[0][0];
       if (!latest || now - latest > 3 * H1) return;
       const v = accum(s, hours, latest);
       if (v == null) return;
-      pts.push({ lat: s.lat, lon: s.lon, v, w: s.q ? 1 : 0.5, n: s.n, src: "IMN" });
-      nImn++;
+      pts.push({ lat: s.lat, lon: s.lon, v, w: s.q ? 1 : 0.5, n: s.n, src: s.src });
+      if (s.src === "IMHPA") nPa++; else nImn++;
     });
     if (hours === 24) data.pa.forEach((s) => {
+      if (s.rows.length) return; // ya entró con su serie horaria
       if (s.mm == null || (s.time && now - s.time > 6 * H1)) return;
       pts.push({ lat: s.lat, lon: s.lon, v: s.mm, w: 1, n: s.n, src: "IMHPA" });
       nPa++;
@@ -200,7 +217,7 @@
     const r = interpolate(pts, 10, 28);
     static_ = { ...r, pts, p: PALS[hours] };
     drawSurface(r.grid, r.ws, PALS[hours], true);
-    setStamp(`Superficie de ${nImn} estaciones del IMN${hours === 24 ? ` y ${nPa} de Panamá` : ""}.${airText(data)}`);
+    setStamp(`Superficie de ${nImn} estaciones del IMN y ${nPa} de Panamá.${airText(data)}`);
     setLegend(PALS[hours]);
   }
 
@@ -208,7 +225,6 @@
   const SERIE = Array.from({ length: 13 }, (_, i) => i - 6); // horas relativas a la última hora medida
   let serie = null; // {t0, steps:[{h, time, grid, ws, kind}], points:[...], nStations, bias}
   let cur = 6;
-  let timer = null;
 
   async function buildSerie(data) {
     const model = await fetch("/api/celeste/modelo").then((r) => r.json());
@@ -222,13 +238,13 @@
     for (const h of SERIE.filter((x) => x <= 0)) {
       const tm = t0 + h * H1;
       const pts = [];
-      data.imn.forEach((s) => { const v = hourValue(s, tm); if (v != null) pts.push({ lat: s.lat, lon: s.lon, v, w: s.q ? 1 : 0.5, n: s.n }); });
+      data.hourly.forEach((s) => { const v = hourValue(s, tm); if (v != null) pts.push({ lat: s.lat, lon: s.lon, v, w: s.q ? 1 : 0.5, n: s.n, src: s.src }); });
       const r = interpolate(pts, 10, 28);
       steps.push({ h, time: new Date(tm), grid: r.grid, ws: r.ws, kind: h === 0 ? "ahora" : "medido", n: pts.length });
     }
     // Sesgo local del modelo: lluvia medida / lluvia del modelo en las últimas 3 horas, en cada estación
     const biasPts = [];
-    data.imn.forEach((s) => {
+    data.hourly.forEach((s) => {
       if (!s.q) return;
       let o = 0, m = 0, n = 0;
       for (let h = 0; h > -3; h--) {
@@ -257,8 +273,14 @@
       steps.push({ h, time: new Date(tm), grid: g, ws: null, kind: "pronostico" });
     }
     const pointsNow = [];
-    data.imn.forEach((s) => { const v = hourValue(s, t0); if (v != null) pointsNow.push({ lat: s.lat, lon: s.lon, v, n: s.n, src: "IMN" }); });
-    serie = { t0, steps, nStations: last.n, biasN: biasPts.length, points: pointsNow };
+    data.hourly.forEach((s) => { const v = hourValue(s, t0); if (v != null) pointsNow.push({ lat: s.lat, lon: s.lon, v, n: s.n, src: s.src }); });
+    steps.forEach((st) => {
+      const sample = [];
+      for (let k = 0; k < N; k += 4) if (Number.isFinite(st.grid[k])) sample.push(st.grid[k]);
+      sample.sort((a, b) => a - b);
+      st.p90 = sample[Math.floor(sample.length * 0.95)] || 0;
+    });
+    serie = { t0, steps, nStations: last.n, nPa: pointsNow.filter((p) => p.src === "IMHPA").length, biasN: biasPts.length, points: pointsNow, builtAt: Date.now() };
   }
 
   function modelAtPoint(model, tSec, lat, lon) {
@@ -276,77 +298,36 @@
   const leadText = (h) => (h === 0 ? "Última hora" : `${h < 0 ? "−" : "+"}${Math.abs(h)} h`);
   const kindText = (st) => ({ medido: "medido en estaciones", ahora: "medido en estaciones", pronostico: st.h <= 2 ? "pronóstico: persistencia y modelo corregido" : "pronóstico: modelo corregido con estaciones" })[st.kind];
 
-  function showSerie(i) {
+  function showSerie(i, off) {
     if (!serie) return;
     cur = clamp(i, 0, serie.steps.length - 1);
     const st = serie.steps[cur];
     drawSurface(st.grid, st.ws, PALS[1], st.kind !== "pronostico");
-    const tl = $("#estTimeline");
-    const end = st.time, start = new Date(end.getTime() - H1);
-    $("#estTime").textContent = `${leadText(st.h)} · ${C.fmtHour.format(start)} a ${C.fmtHour.format(end)}`;
-    $("#estAgo").textContent = kindText(st);
-    [...$("#estBars").children].forEach((b, j) => {
-      b.classList.toggle("current", j === cur);
-      b.style.background = j === cur ? "" : (C.bandColor(PALS[1], serie.steps[j].p90) || "");
-    });
-    $("#estBars").setAttribute("aria-valuenow", String(cur));
-    tl.hidden = !active || mode !== "serie";
-    syncStack();
+    C.setOff(map.getPane("estaciones"), off);
   }
 
-  function drawSerieBars() {
-    const bars = $("#estBars");
-    bars.innerHTML = "";
-    serie.steps.forEach((st, j) => {
-      const sample = [];
-      for (let k = 0; k < N; k += 4) if (Number.isFinite(st.grid[k])) sample.push(st.grid[k]);
-      sample.sort((a, b) => a - b);
-      st.p90 = sample[Math.floor(sample.length * 0.95)] || 0;
-      const b = document.createElement("span");
-      b.className = "tl-bar" + (st.h < 0 ? " past" : "") + (st.h === 0 ? " now" : "") + (st.h > 0 ? " fut" : "");
-      b.style.height = `${6 + 28 * clamp(Math.log1p(st.p90) / Math.log1p(15))}px`;
-      b.title = `${leadText(st.h)}: el 5 % más lluvioso del país supera ${C.fmtNum1.format(st.p90)} mm en la hora`;
-      bars.appendChild(b);
+  // Fila de la superficie horaria en la línea de tiempo (cada paso es la lluvia de la hora que termina ahí)
+  function registerTime() {
+    if (!serie || !active || mode !== "serie") return;
+    const byT = new Map(serie.steps.map((st, i) => [st.time.getTime(), i]));
+    C.time.register("estaciones", {
+      label: "Lluvia de estaciones hora a hora (derivado)", short: "Estaciones ±6 h", icon: C.icon("surface"), order: 3,
+      times: [...byT.keys()], tol: 35 * 60000, step: H1,
+      fc: (t) => t > serie.t0,
+      value: (t) => clamp(Math.log1p(serie.steps[byT.get(t)].p90) / Math.log1p(15)),
+      show: (t, off) => showSerie(byT.get(t), off),
     });
-    $("#estStart").textContent = C.fmtHour.format(serie.steps[0].time);
-    $("#estEnd").textContent = C.fmtHour.format(serie.steps[serie.steps.length - 1].time);
   }
 
-  function play() {
-    if (timer || !serie) return;
-    const btn = $("#estPlay");
-    btn.classList.add("playing");
-    btn.setAttribute("aria-label", "Pausar la animación de estaciones");
-    const step = () => { const n = cur >= serie.steps.length - 1 ? 0 : cur + 1; showSerie(n); timer = setTimeout(step, n === 6 ? 1300 : n === serie.steps.length - 1 ? 1800 : 700); };
-    timer = setTimeout(step, 200);
+  // La serie para el índice CELESTE (se calcula si hace falta)
+  let serieProm = null;
+  async function getSerie() {
+    if (serie && Date.now() - serie.builtAt < 10 * 60000) return serie;
+    if (!serieProm) serieProm = load().then(buildSerie).then(() => serie).finally(() => { serieProm = null; });
+    return serieProm;
   }
-  function stop() {
-    clearTimeout(timer); timer = null;
-    const btn = $("#estPlay");
-    btn.classList.remove("playing");
-    btn.setAttribute("aria-label", "Reproducir la animación de estaciones");
-  }
-  $("#estPlay").addEventListener("click", () => (timer ? stop() : play()));
-  (function () {
-    const bars = $("#estBars");
-    const pick = (e) => { if (!serie) return; const r = bars.getBoundingClientRect(); stop(); showSerie(Math.floor(((e.clientX - r.left) / r.width) * serie.steps.length)); };
-    let dragging = false;
-    bars.addEventListener("pointerdown", (e) => { dragging = true; bars.setPointerCapture(e.pointerId); pick(e); });
-    bars.addEventListener("pointermove", (e) => { if (dragging) pick(e); });
-    bars.addEventListener("pointerup", () => (dragging = false));
-    bars.addEventListener("keydown", (e) => {
-      if (e.key === "ArrowLeft") { stop(); showSerie(cur - 1); e.preventDefault(); }
-      if (e.key === "ArrowRight") { stop(); showSerie(cur + 1); e.preventDefault(); }
-      if (e.key === " ") { timer ? stop() : play(); e.preventDefault(); }
-    });
-  })();
-
-  // Si también está la línea de tiempo del radar, se apilan
-  function syncStack() {
-    const both = !$("#estTimeline").hidden && !$("#timeline").hidden;
-    document.body.classList.toggle("tl-apiladas", both);
-  }
-  new MutationObserver(syncStack).observe($("#timeline"), { attributes: true, attributeFilter: ["hidden"] });
+  C.stations.serie = getSerie;
+  C.stations.AREA = { w: W, h: H, bbox: AREA.bbox, MIN_W };
 
   // ---------- Panel ----------
   const setStamp = (t) => { const el = box && $(".stamp", box); if (el) el.textContent = t; };
@@ -361,15 +342,14 @@
     const data = await load();
     if (mode === "serie") {
       setStamp("Calculando la serie horaria…");
-      await buildSerie(data);
-      drawSerieBars();
+      await getSerie();
       showSerie(6);
+      registerTime();
       setLegend(PALS[1]);
-      setStamp(`${serie.nStations} estaciones del IMN con dato en la última hora. Pronóstico corregido con el sesgo local de ${serie.biasN} estaciones.${airText(data)}`);
+      setStamp(`${serie.nStations} estaciones con dato en la última hora (${serie.nStations - serie.nPa} del IMN y ${serie.nPa} de Panamá). Pronóstico corregido con el sesgo local de ${serie.biasN} estaciones. Usa la línea de tiempo de abajo.${airText(data)}`);
     } else {
-      stop();
-      $("#estTimeline").hidden = true;
-      syncStack();
+      C.time.unregister("estaciones");
+      C.setOff(map.getPane("estaciones"), false);
       drawStatic(data);
     }
   }
@@ -382,7 +362,7 @@
       </div>
       <div class="est-legend"></div>
       <p class="stamp">Cargando estaciones…</p>
-      <p class="layer-desc">La línea punteada encierra la zona con estaciones cercanas: dentro de ella, sin color significa que no llovió. El pronóstico usa el modelo corregido con lo que miden las estaciones. Panamá solo publica 24 horas.</p>`;
+      <p class="layer-desc">Derivado de las estaciones del IMN y de Panamá. La línea punteada encierra la zona con estaciones cercanas: dentro de ella, sin color significa que no llovió. El pronóstico usa el modelo corregido con lo que miden las estaciones.</p>`;
   }
 
   C.ext = C.ext || {};
@@ -402,10 +382,9 @@
       });
     }
     if (!on) {
-      stop();
       if (group) map.removeLayer(group);
-      $("#estTimeline").hidden = true;
-      syncStack();
+      C.time.unregister("estaciones");
+      C.setOff(map.getPane("estaciones"), false);
       return;
     }
     try { await render(); }
