@@ -16,4 +16,4 @@ Si se define el secreto `SITE_PASSWORD` en Cloudflare, el sitio la pide. Sin él
 ## Pendientes antes de uso comercial
 - Convenio con COCESNA para el radar.
 - Plan pago de Open-Meteo (el gratuito es solo no comercial).
-- Licencias comerciales de mapas de fondo (CARTO / Esri).
+- Licencias comerciales de mapas de fondo (Esri).

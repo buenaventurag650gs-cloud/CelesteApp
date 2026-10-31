@@ -63,7 +63,7 @@
     center: [9.85, -84.15],
     zoom: window.innerWidth < 820 ? 7 : 8,
     minZoom: 6,
-    maxZoom: 13,
+    maxZoom: 16,
     zoomControl: false,
     attributionControl: true,
     worldCopyJump: false,
@@ -76,8 +76,9 @@
   map.createPane("etiquetas").style.zIndex = 640;
   map.getPane("etiquetas").style.pointerEvents = "none";
 
-  const CARTO = "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> &copy; <a href='https://carto.com/attributions'>CARTO</a>";
-  const ESRI = "Tiles &copy; Esri";
+  const ESRI = "Mapas: Esri, HERE, Garmin, &copy; colaboradores de <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a>";
+  const ESRI_SAT = "Imágenes: Esri, Maxar, Earthstar Geographics";
+  const ARC = (path) => `https://server.arcgisonline.com/ArcGIS/rest/services/${path}/MapServer/tile/{z}/{y}/{x}`;
   let baseKey = store.get("celeste-fondo") || "calles";
   let baseLayer = null;
   let labelLayer = null;
@@ -89,14 +90,14 @@
     if (labelLayer) map.removeLayer(labelLayer);
     const dark = isDark();
     if (key === "satelite") {
-      baseLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { attribution: ESRI, maxZoom: 19 });
-      labelLayer = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png", { pane: "etiquetas", attribution: CARTO, subdomains: "abcd" });
+      baseLayer = L.tileLayer(ARC("World_Imagery"), { attribution: ESRI_SAT, maxZoom: 19 });
+      labelLayer = L.tileLayer(ARC("Reference/World_Boundaries_and_Places"), { pane: "etiquetas", attribution: ESRI, maxZoom: 19 });
     } else if (key === "relieve") {
-      baseLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}", { attribution: ESRI, maxZoom: 16, className: dark ? "relieve-oscuro" : "" });
-      labelLayer = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? "dark" : "light"}_only_labels/{z}/{x}/{y}{r}.png`, { pane: "etiquetas", attribution: CARTO, subdomains: "abcd" });
+      baseLayer = L.tileLayer(ARC("Elevation/World_Hillshade"), { attribution: ESRI, maxZoom: 16, className: dark ? "relieve-oscuro" : "" });
+      labelLayer = L.tileLayer(ARC(`Canvas/World_${dark ? "Dark" : "Light"}_Gray_Reference`), { pane: "etiquetas", attribution: ESRI, maxZoom: 16 });
     } else {
-      baseLayer = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? "dark" : "light"}_nolabels/{z}/{x}/{y}{r}.png`, { attribution: CARTO, subdomains: "abcd", maxZoom: 19 });
-      labelLayer = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? "dark" : "light"}_only_labels/{z}/{x}/{y}{r}.png`, { pane: "etiquetas", attribution: CARTO, subdomains: "abcd" });
+      baseLayer = L.tileLayer(ARC(`Canvas/World_${dark ? "Dark" : "Light"}_Gray_Base`), { attribution: ESRI, maxZoom: 16 });
+      labelLayer = L.tileLayer(ARC(`Canvas/World_${dark ? "Dark" : "Light"}_Gray_Reference`), { pane: "etiquetas", attribution: ESRI, maxZoom: 16 });
     }
     baseLayer.addTo(map);
     labelLayer.addTo(map);
@@ -156,7 +157,7 @@
   function makeLayer(def) {
     if (def.type === "gibs") {
       return L.tileLayer(GIBS_WMTS(def.id, def.level), {
-        pane: "clima", maxNativeZoom: def.level, maxZoom: 13, opacity: def.opacity, attribution: GIBS_ATTR,
+        pane: "clima", maxNativeZoom: def.level, maxZoom: 16, opacity: def.opacity, attribution: GIBS_ATTR,
         bounds: [[-85, -180], [85, 180]], errorTileUrl: "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
       });
     }
@@ -331,7 +332,7 @@
     }
 
     async function load(keepPosition) {
-      const stamp = $("#radarStamp");
+      const stamp = { set textContent(t) { const el = $("#radarStamp"); if (el) el.textContent = t; } };
       try {
         const r = await fetch("/api/radar/tiempos", { cache: "no-store" });
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
