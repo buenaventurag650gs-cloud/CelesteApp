@@ -70,7 +70,7 @@
   }
   const steps = (a, b, s) => { const r = []; for (let v = a; v <= b + 1e-9; v += s) r.push(+v.toFixed(4)); return r; };
 
-  const RAIN_COLORS = ["#cfe8f6", "#9fd0ef", "#64b2e4", "#2f8fd3", "#1f66b5", "#3a3f9c", "#6e2a92", "#b0237a"];
+  const RAIN_COLORS = ["#a6d8f2", "#78c0ea", "#4aa6e0", "#2f8fd3", "#1f66b5", "#3a3f9c", "#6e2a92", "#b0237a"];
   const THERMAL = ["#2c4f8f", "#3f7fbf", "#6fb3d6", "#a8dcd1", "#e8efb0", "#f7d07a", "#f09a4f", "#d9583a", "#a8263a"];
 
   const PAL = {
@@ -299,15 +299,15 @@
   const GIBS_WMTS = (id, level) => `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${id}/default/default/GoogleMapsCompatible_Level${level}/{z}/{y}/{x}.png`;
 
   // Área de las capas de datos: Costa Rica con mar alrededor
-  const FIELD_AREA = [6.6, -88.2, 12.0, -81.2];
+  const FIELD_AREA = [4.8, -90.5, 13.8, -78.5];
 
   const GROUPS = [
     {
       title: "Lluvia",
       layers: [
         { key: "radar", type: "radar", name: "Radar de lluvia", desc: "COCESNA, cada 10 minutos. Cubre el norte y el centro del país.", on: true, opacity: 0.8, pal: "rain" },
-        { key: "imerg30", type: "field", id: "IMERG_Precipitation_Rate_30min", name: "Lluvia estimada por satélite", desc: "NASA IMERG, cada 30 minutos con unas horas de retraso. Cubre todo el país.", opacity: 0.75, pal: "rain", srcWidth: 72, sigma: 5 },
-        { key: "imergday", type: "field", id: "IMERG_Precipitation_Rate", name: "Lluvia del último día", desc: "NASA IMERG, total del día anterior.", opacity: 0.75, pal: "rainDay", srcWidth: 72, sigma: 5, scale: 24 },
+        { key: "imerg30", type: "field", id: "IMERG_Precipitation_Rate_30min", name: "Lluvia estimada por satélite", desc: "NASA IMERG, cada 30 minutos con unas horas de retraso. Cubre todo el país.", opacity: 0.75, pal: "rain", srcWidth: 124, sigma: 6 },
+        { key: "imergday", type: "field", id: "IMERG_Precipitation_Rate", name: "Lluvia del último día", desc: "NASA IMERG, total del día anterior.", opacity: 0.75, pal: "rainDay", srcWidth: 124, sigma: 6, scale: 24 },
       ],
     },
     {
@@ -321,11 +321,11 @@
     {
       title: "Mar y tierra",
       layers: [
-        { key: "sst", type: "field", id: "GHRSST_L4_MUR_Sea_Surface_Temperature", name: "Temperatura del mar", desc: "GHRSST, diaria.", opacity: 0.8, pal: "sst", srcWidth: 520, sigma: 1.6 },
-        { key: "ssta", type: "field", id: "GHRSST_L4_MUR_Sea_Surface_Temperature_Anomalies", name: "Mar más caliente o más frío de lo normal", desc: "Anomalía diaria. Sirve para seguir El Niño y La Niña.", opacity: 0.8, pal: "ssta", srcWidth: 520, sigma: 1.6 },
-        { key: "lst", type: "field", id: "MODIS_Terra_L3_Land_Surface_Temp_8Day_Day", name: "Temperatura del suelo de día", desc: "MODIS, promedio de 8 días. Muestra islas de calor.", opacity: 0.75, pal: "lst", srcWidth: 520, sigma: 1.4 },
-        { key: "ndvi", type: "field", id: "VIIRS_SNPP_L3_NDVI_16Day", name: "Verdor de la vegetación", desc: "VIIRS, 16 días. Bajo en zonas secas o deforestadas.", opacity: 0.75, pal: "ndvi", srcWidth: 520, sigma: 1.4 },
-        { key: "aod", type: "field", id: "MODIS_Combined_MAIAC_L2G_AerosolOpticalDepth", name: "Partículas en el aire", desc: "MODIS, diaria. Humo, polvo y contaminación.", opacity: 0.75, pal: "aod", srcWidth: 400, sigma: 2 },
+        { key: "sst", type: "field", id: "GHRSST_L4_MUR_Sea_Surface_Temperature", name: "Temperatura del mar", desc: "GHRSST, diaria.", opacity: 0.8, pal: "sst", srcWidth: 860, sigma: 1.6 },
+        { key: "ssta", type: "field", id: "GHRSST_L4_MUR_Sea_Surface_Temperature_Anomalies", name: "Mar más caliente o más frío de lo normal", desc: "Anomalía diaria. Sirve para seguir El Niño y La Niña.", opacity: 0.8, pal: "ssta", srcWidth: 860, sigma: 1.6 },
+        { key: "lst", type: "field", id: "MODIS_Terra_L3_Land_Surface_Temp_8Day_Day", name: "Temperatura del suelo de día", desc: "MODIS, promedio de 8 días. Muestra islas de calor.", opacity: 0.75, pal: "lst", srcWidth: 860, sigma: 1.4 },
+        { key: "ndvi", type: "field", id: "VIIRS_SNPP_L3_NDVI_16Day", name: "Verdor de la vegetación", desc: "VIIRS, 16 días. Bajo en zonas secas o deforestadas.", opacity: 0.75, pal: "ndvi", srcWidth: 860, sigma: 1.4 },
+        { key: "aod", type: "field", id: "MODIS_Combined_MAIAC_L2G_AerosolOpticalDepth", name: "Partículas en el aire", desc: "MODIS, diaria. Humo, polvo y contaminación.", opacity: 0.75, pal: "aod", srcWidth: 680, sigma: 2 },
         { key: "fires", type: "fires", name: "Focos de incendio", desc: "VIIRS, focos detectados ayer.", opacity: 1 },
       ],
     },
@@ -360,7 +360,7 @@
     stamp.textContent = "Procesando la capa…";
     const [s, w, n, e] = FIELD_AREA;
     const src = extent(s, w, n, e, def.srcWidth);
-    const tgt = extent(s, w, n, e, 460);
+    const tgt = extent(s, w, n, e, 620);
     try {
       const [lk, img] = await Promise.all([
         gibsLookup(def.id),
@@ -383,7 +383,7 @@
         raw[i] = v;
       }
       const up = resample(raw, img.w, img.h, tgt.w, tgt.h);
-      const grid = blur(up, tgt.w, tgt.h, def.sigma * (tgt.w / 460));
+      const grid = blur(up, tgt.w, tgt.h, def.sigma * (tgt.w / 620));
       const geo = polygons(grid, tgt.w, tgt.h, tgt.bbox, p);
       if (!def._on) return;
       const old = fields.get(def.key);
@@ -493,6 +493,7 @@
     const bboxStr = area.bbox.map((n) => n.toFixed(1)).join(",");
     const FRAMES = 18; // 3 horas
     const p = PAL.rain;
+    const RADAR_ATTR = "Radar: <a href='http://rainweb.cocesna.org:8080/rainweb/site'>COCESNA</a>";
 
     let product = "LNB_CAPPI_Z_450Km_1Km_cappi_dBZ";
     let enabled = false;
@@ -651,12 +652,14 @@
     return {
       enable() {
         enabled = true;
+        map.attributionControl.addAttribution(RADAR_ATTR);
         load(false);
         clearInterval(refresh);
         refresh = setInterval(() => load(true), 5 * 60 * 1000);
       },
       disable() {
         enabled = false;
+        map.attributionControl.removeAttribution(RADAR_ATTR);
         gen++;
         pause();
         clearInterval(refresh);
