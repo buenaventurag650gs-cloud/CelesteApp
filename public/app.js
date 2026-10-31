@@ -221,6 +221,7 @@
       return r.json();
     }).then((data) => {
       const map = new Map();
+      const list = [];
       const kelvin = /k/i.test(data.unidades) && !/km/i.test(data.unidades);
       data.entradas.forEach(([r, g, b, transp, lo, hi]) => {
         let v;
@@ -230,8 +231,20 @@
         else if (hi == null || hi >= 1e29) v = lo;
         else v = (lo + hi) / 2;
         map.set((r << 16) | (g << 8) | b, v);
+        if (Number.isFinite(v)) list.push([r, g, b, v]);
       });
-      return { map, kelvin };
+      // Color más cercano de la paleta (para mosaicos remuestreados, que mezclan colores vecinos)
+      const near = new Map();
+      const nearest = (r, g, b) => {
+        const k = (r << 16) | (g << 8) | b;
+        if (map.has(k)) return map.get(k);
+        if (near.has(k)) return near.get(k);
+        let best = NaN, bd = 30 * 30 * 3;
+        for (const e of list) { const d = (e[0] - r) ** 2 + (e[1] - g) ** 2 + (e[2] - b) ** 2; if (d < bd) { bd = d; best = e[3]; } }
+        near.set(k, best);
+        return best;
+      };
+      return { map, kelvin, nearest };
     });
     paletteCache.set(id, prom);
     return prom;
@@ -370,7 +383,7 @@
         {
           key: "ir", type: "tiles", icon: "cloud", src: "noaa", time: true, tStep: 10, window: 4, id: "GOES-East_ABI_Band13_Clean_Infrared", level: 6, name: "Nubes por temperatura (GOES-Este)", desc: "Infrarrojo cada 10 minutos. Los topes más fríos son las tormentas más altas.", opacity: 0.7,
           children: [
-            { key: "goesrain", type: "field", icon: "drop", from: ["noaa"], idx: true, time: true, tStep: 10, window: 4, id: "GOES-East_ABI_Band13_Clean_Infrared", conv: goesRain, area: CR_AREA, name: "Lluvia estimada por nubes frías", desc: "Se deriva de la temperatura de los topes: más fríos, lluvia más intensa. Cubre todo el país.", opacity: 0.75, pal: "rain", srcWidth: 330, sigma: 1.6 },
+            { key: "goesrain", type: "field", icon: "drop", from: ["noaa"], idx: true, time: true, tStep: 10, window: 4, id: "GOES-East_ABI_Band13_Clean_Infrared", tileLevel: 6, level: 6, conv: goesRain, area: CR_AREA, name: "Lluvia estimada por nubes frías", desc: "Se deriva de la temperatura de los topes: más fríos, lluvia más intensa. Cubre todo el país.", opacity: 0.75, pal: "rain", srcWidth: 330, sigma: 1.6 },
           ],
         },
         { key: "imerg30", type: "field", icon: "drop", src: "nasa", idx: true, time: true, tStep: 30, window: 12, id: "IMERG_Precipitation_Rate_30min", name: "Lluvia estimada IMERG", desc: "NASA, cada 30 minutos con unas 5 horas de retraso. Cubre todo el país y el mar.", opacity: 0.75, pal: "rain", srcWidth: 124, sigma: 6 },
@@ -431,7 +444,58 @@
 
   // Imagen de GIBS decodificada a valores (por capa, hora y área), con caché
   const decoded = new Map();
+  // Mosaicos WMTS de GIBS (para capas que el WMS no sirve, como GOES): se arma la imagen con las teselas
+  const R_EARTH = 20037508.342789;
+  async function tileBitmap(url) {
+    for (let i = 0; i < 3; i++) {
+      try {
+        const r = await fetch(url);
+        if (r.ok && (r.headers.get("content-type") || "").startsWith("image/")) return await createImageBitmap(await r.blob(), { colorSpaceConversion: "none", premultiplyAlpha: "none" });
+      } catch (e) { /* reintento */ }
+      await new Promise((res) => setTimeout(res, 400 * (i + 1)));
+    }
+    return null;
+  }
+  async function wmtsDecoded(def, time) {
+    const z = def.tileLevel, n = 2 ** z;
+    const [s, w, nn, e] = def.area || FIELD_AREA;
+    const tyOf = (lat) => Math.floor(((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2) * n);
+    const tx0 = Math.floor(((w + 180) / 360) * n), tx1 = Math.floor(((e + 180) / 360) * n);
+    const ty0 = tyOf(nn), ty1 = tyOf(s);
+    const Wp = (tx1 - tx0 + 1) * 256, Hp = (ty1 - ty0 + 1) * 256;
+    const cv = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(Wp, Hp) : Object.assign(document.createElement("canvas"), { width: Wp, height: Hp });
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
+    const jobs = [];
+    for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+      const url = `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${def.id}/default/${time || "default"}/GoogleMapsCompatible_Level${def.level}/${z}/${ty}/${tx}.png`;
+      jobs.push(tileBitmap(url).then((bmp) => { if (bmp) ctx.drawImage(bmp, (tx - tx0) * 256, (ty - ty0) * 256); return !!bmp; }));
+    }
+    const ok = await Promise.all(jobs);
+    if (!ok.some(Boolean)) throw new Error("sin teselas");
+    const lk = await gibsLookup(def.id);
+    const px = ctx.getImageData(0, 0, Wp, Hp).data;
+    const raw = new Float32Array(Wp * Hp);
+    let found = 0;
+    for (let i = 0, j = 0; i < raw.length; i++, j += 4) {
+      let v = px[j + 3] > 0 ? lk.nearest(px[j], px[j + 1], px[j + 2]) : NaN;
+      if (Number.isFinite(v)) { found++; if (def.conv) v = def.conv(v); } else if (def.pal.startsWith("rain")) v = 0;
+      raw[i] = v;
+    }
+    const bbox = [(tx0 / n) * 2 * R_EARTH - R_EARTH, R_EARTH - ((ty1 + 1) / n) * 2 * R_EARTH, ((tx1 + 1) / n) * 2 * R_EARTH - R_EARTH, R_EARTH - (ty0 / n) * 2 * R_EARTH];
+    return { raw, w: Wp, h: Hp, bbox, found };
+  }
+
   function gibsDecoded(def, time) {
+    if (def.tileLevel) {
+      const key = `wmts|${def.key}|${time || ""}`;
+      if (!decoded.has(key)) {
+        const prom = wmtsDecoded(def, time);
+        prom.catch(() => decoded.delete(key));
+        decoded.set(key, prom);
+        if (decoded.size > 60) decoded.delete(decoded.keys().next().value);
+      }
+      return decoded.get(key);
+    }
     const [s, w, n, e] = def.area || FIELD_AREA;
     const src = extent(s, w, n, e, def.srcWidth);
     const key = `${def.id}|${def.key}|${time || ""}`;
@@ -514,7 +578,7 @@
       if (!fr) {
         if (!fc.size) stamp.textContent = "Procesando la capa…";
         const d = await gibsDecoded(def, time);
-        const up = resample(d.raw, d.w, d.h, tgt.w, tgt.h);
+        const up = def.tileLevel ? regrid(d, tgt) : resample(d.raw, d.w, d.h, tgt.w, tgt.h);
         const grid = blur(up, tgt.w, tgt.h, def.sigma * (tgt.w / 620));
         fr = { grid, layer: polyLayer(def, polygons(grid, tgt.w, tgt.h, tgt.bbox, PAL[def.pal])), found: d.found };
         fc.set(want, fr);
@@ -544,7 +608,7 @@
     }
     const lbl = def.name.replace(/\s*\(.*\)$/, "");
     TL().register(def.key, {
-      label: def.name, short: def.short || lbl, icon: icon(def.icon), times, tol: def.tStep * 0.6 * 60000, step: def.tStep * 60000, order: def.order || ORDER[def.key] || 50,
+      label: def.name, short: def.short || lbl, icon: icon(def.icon), times, tol: Math.max(def.tStep * 0.6, def.tStep <= 10 ? 16 : 0) * 60000, step: def.tStep * 60000, order: def.order || ORDER[def.key] || 50,
       show: (t, off) => {
         if (def.type === "field") { loadField(def, box, isoMin(t)); setOff(map.getPane(def.pane), off); }
         else showTile(def, isoMin(t), off);
