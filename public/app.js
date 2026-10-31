@@ -284,11 +284,15 @@
 
     function drawBars() {
       bars.innerHTML = "";
-      const max = Math.max(0.002, ...frames.map((f) => f.cover || 0));
+      const covers = frames.filter((f) => f.loaded).map((f) => f.cover || 0);
+      const max = Math.max(0.002, ...covers);
+      const lo = covers.length ? Math.min(...covers) * 0.7 : 0;
       frames.forEach((f, i) => {
         const b = document.createElement("span");
         b.className = "tl-bar" + (f.loaded ? "" : " loading") + (i === idx ? " current" : "");
-        b.style.height = f.loaded ? `${4 + 30 * ((f.cover || 0) / max)}px` : "4px";
+        const k = max > lo ? ((f.cover || 0) - lo) / (max - lo) : 1;
+        b.style.height = f.loaded ? `${6 + 28 * Math.max(0, k)}px` : "4px";
+        b.title = f.loaded ? `${fmtHour.format(new Date(f.time))}: lluvia en ${fmtNum1.format((f.cover || 0) * 100)} % del área del radar` : "Cargando…";
         bars.appendChild(b);
       });
       bars.setAttribute("aria-valuemax", String(Math.max(0, frames.length - 1)));
