@@ -214,7 +214,7 @@
   }
 
   let pending = null;
-  const schedule = () => { if (pending) return; pending = requestAnimationFrame(() => { pending = null; render(); }); };
+  const schedule = () => { if (pending) return; pending = setTimeout(() => { pending = null; render(); }, 0); };
 
   window.CelesteTime = {
     register(key, def) {
