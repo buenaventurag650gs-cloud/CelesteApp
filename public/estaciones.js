@@ -16,7 +16,7 @@
       const meta = await fetch("/datos/estaciones-imn.json").then((r) => r.json());
       const list = meta.estaciones.map(([n, t, lat, lon, q]) => ({ n, t, lat, lon, q, rows: [] }));
       const chunks = [];
-      for (let i = 0; i < list.length; i += 40) chunks.push(list.slice(i, i + 40));
+      for (let i = 0; i < list.length; i += 12) chunks.push(list.slice(i, i + 12)); // el plan gratuito de Cloudflare limita las consultas por solicitud
       const [batches, pa, air] = await Promise.all([
         Promise.all(chunks.map((c) => fetch(`/api/estaciones/imn?t=${c.map((s) => s.t).join(",")}`).then((r) => r.json()).catch(() => ({ estaciones: {} })))),
         fetch("/api/estaciones/panama").then((r) => r.json()).catch(() => ({ estaciones: [] })),
@@ -87,7 +87,7 @@
       const c = C.bandColor(p, v);
       L.circleMarker([s.lat, s.lon], {
         pane: "estaciones", radius: v >= p.levels[0] ? 5 + Math.min(7, Math.sqrt(v) * 1.4) : 3.5,
-        fillColor: c || "#ffffff", fillOpacity: c ? 0.95 : 0.7, color: "#ffffff", weight: 1.2, dashArray: s.q ? null : "2 2",
+        fillColor: c || "#ffffff", fillOpacity: c ? 0.95 : 0.85, color: c ? "#ffffff" : "#5d7488", weight: c ? 1.2 : 1, dashArray: s.q ? null : "2 2",
       }).bindTooltip(`<b>${s.n}</b><br>${C.fmtNum1.format(v)} ${p.units}<br><span class="muted">IMN, ${C.fmtHour.format(new Date(latest))}${s.q ? "" : ". Ubicación aproximada"}</span>`, { direction: "top" }).addTo(group);
     });
     if (hours === 24) {
@@ -97,7 +97,7 @@
         const c = C.bandColor(p, s.mm);
         L.circleMarker([s.lat, s.lon], {
           pane: "estaciones", radius: s.mm >= p.levels[0] ? 5 + Math.min(7, Math.sqrt(s.mm) * 1.4) : 3.5,
-          fillColor: c || "#ffffff", fillOpacity: c ? 0.95 : 0.7, color: "#ffffff", weight: 1.2,
+          fillColor: c || "#ffffff", fillOpacity: c ? 0.95 : 0.85, color: c ? "#ffffff" : "#5d7488", weight: c ? 1.2 : 1,
         }).bindTooltip(`<b>${s.n}</b><br>${C.fmtNum1.format(s.mm)} ${p.units}<br><span class="muted">IMHPA Panamá${s.time ? `, ${C.fmtHour.format(new Date(s.time))}` : ""}</span>`, { direction: "top" }).addTo(group);
       });
     }

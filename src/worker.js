@@ -351,7 +351,7 @@ async function imnTable(t, ctx) {
 }
 
 async function imnStations(url, ctx) {
-  const list = (url.searchParams.get("t") || "").split(",").filter((t) => /^[a-z0-9]{2,30}$/.test(t)).slice(0, 40);
+  const list = (url.searchParams.get("t") || "").split(",").filter((t) => /^[a-z0-9]{2,30}$/.test(t)).slice(0, 12); // ≤ 12 × (consulta + caché) dentro del límite de subconsultas
   if (!list.length) return json({ error: "Sin estaciones." }, 400);
   const out = {};
   await Promise.all(list.map(async (t) => {
