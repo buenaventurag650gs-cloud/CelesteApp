@@ -37,11 +37,13 @@ export default {
       if (url.pathname === "/api/radar/datos") return radarData(url, ctx);
       if (url.pathname === "/api/gibs/mapa") return gibsMap(url, ctx);
       if (url.pathname === "/api/gibs/paleta") return gibsPalette(url, ctx);
+      if (url.pathname === "/api/gibs/tiempos" || url.pathname === "/api/goes/tiempos") return gibsTimes(url, ctx);
       if (url.pathname === "/api/celeste/modelo") return modelGrid(ctx);
       if (url.pathname === "/api/estaciones/imn") return imnStations(url, ctx);
       if (url.pathname === "/api/radar/imn") return imnRadar(ctx);
       if (url.pathname === "/api/imn/regiones") return imnRegions(ctx);
       if (url.pathname === "/api/estaciones/panama") return panamaStations(ctx);
+      if (url.pathname === "/api/estaciones/panama/serie") return panamaSeries(url, ctx);
       if (url.pathname === "/api/estaciones/aeropuertos") return airports(ctx);
       if (url.pathname === "/api/salud") return json({ ok: true, hora: new Date().toISOString() });
     } catch (err) {
@@ -191,7 +193,40 @@ const GIBS_LAYERS = {
   MODIS_Terra_L3_Land_Surface_Temp_8Day_Day: "MODIS_Land_Surface_Temp",
   VIIRS_SNPP_L3_NDVI_16Day: "MODIS_L3_NDVI",
   MODIS_Combined_MAIAC_L2G_AerosolOpticalDepth: "MODIS_VIIRS_AOD",
+  "GOES-East_ABI_Band13_Clean_Infrared": "Clean_Longwave_Infrared_Window_Band",
 };
+
+// Horas disponibles en GIBS para las capas con tiempo (GOES cada 10 min con ~20 min de retraso;
+// IMERG cada 30 min con ~5 h de retraso). Últimas 12 horas.
+const TIME_LAYERS = {
+  "GOES-East_ABI_Band13_Clean_Infrared": "GoogleMapsCompatible_Level6",
+  "GOES-East_ABI_GeoColor": "GoogleMapsCompatible_Level7",
+  "GOES-East_ABI_Dust": "GoogleMapsCompatible_Level7",
+  IMERG_Precipitation_Rate_30min: "GoogleMapsCompatible_Level6",
+};
+async function gibsTimes(url, ctx) {
+  const layer = url.searchParams.get("capa");
+  const matrix = TIME_LAYERS[layer];
+  if (!matrix) return json({ error: "Capa no permitida." }, 400);
+  const slot = Math.floor(Date.now() / 300000);
+  return cachedJSON(`https://celeste.cache/gibs/tiempos/${layer}/${slot}`, 300, ctx, async () => {
+    const end = new Date(Date.now() + 600000), start = new Date(Date.now() - 12 * 3600000);
+    const iso = (d) => d.toISOString().slice(0, 17) + "00Z";
+    const up = await fetch(`${GIBS}/wmts/epsg3857/best/1.0.0/${layer}/default/${matrix}/all/${iso(start)}--${iso(end)}.xml`);
+    if (!up.ok) return { capa: layer, tiempos: [] };
+    const xml = await up.text();
+    const dom = (xml.match(/<Domain>([^<]*)<\/Domain>/) || [])[1] || "";
+    const times = [];
+    dom.split(",").forEach((part) => {
+      const [a, b, per] = part.trim().split("/");
+      if (!a) return;
+      if (!b) { times.push(a); return; }
+      const stepMin = parseInt((per || "PT10M").replace(/\D/g, ""), 10) || 10;
+      for (let t = Date.parse(a); t <= Date.parse(b); t += stepMin * 60000) times.push(new Date(t).toISOString().slice(0, 19) + "Z");
+    });
+    return { capa: layer, tiempos: times.filter((t) => Date.parse(t) >= start.getTime()) };
+  });
+}
 const GIBS = "https://gibs.earthdata.nasa.gov";
 
 async function gibsMap(url, ctx) {
@@ -416,21 +451,80 @@ async function imnRegions(ctx) {
   });
 }
 
-// Panamá (IMHPA): lluvia acumulada de 24 horas en estaciones de la región occidental
+// Panamá (IMHPA): estaciones del occidente (incluida la franja fronteriza con Costa Rica).
+// Lluvia de 24 h y las demás variables que publica cada estación; niveles de ríos aparte.
+const PA_SENSORS = {
+  LLUVIA: "lluvia", TEMP_PROM: "temp", HR_PROM: "hr", P_BAROM: "pres", RAD_SOLAR: "rad",
+  "VEL_VIENTO-VEL_VIENTO10": "viento", "DIR_VIENTO10-DIR_VIENTO": "dir", RAFAGA: "rafaga", NIVEL: "nivel",
+};
+function paDate(s) {
+  const m = String(s || "").match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*([AP])M/i);
+  if (!m) return null;
+  let h = parseInt(m[4], 10) % 12;
+  if (m[6].toUpperCase() === "P") h += 12;
+  return `${m[3]}-${m[2]}-${m[1]}T${String(h).padStart(2, "0")}:${m[5]}:00-05:00`;
+}
 async function panamaStations(ctx) {
-  return cachedJSON("https://celeste.cache/panama/lluvia", 900, ctx, async () => {
-    const r = await fetch("https://www.imhpa.gob.pa/es/estaciones-satelitales-data2?sensor=LLUVIA", { headers: { "User-Agent": "CelesteApp/0.1 (visor climatico)" } });
-    if (!r.ok) return { estaciones: [] };
-    const j = await r.json();
-    const est = Object.values(j.estaciones || {}).map((e) => {
-      const lat = num(e.latitud), lon = num(e.longitud);
-      const m = String(e.sensor_fecha || "").match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*([AP])M/i);
-      let iso = null;
-      if (m) { let h = parseInt(m[4], 10) % 12; if (m[6].toUpperCase() === "P") h += 12; iso = `${m[3]}-${m[2]}-${m[1]}T${String(h).padStart(2, "0")}:${m[5]}:00-05:00`; }
-      return [e.nombre, lat, lon, Number.isFinite(e.sensor_valor_sin_format) ? e.sensor_valor_sin_format : num(e.sensor_valor), iso];
-    }).filter((e) => e[1] != null && e[2] != null && e[1] < 10.5 && e[2] < -81.0);
-    return { fuente: "IMHPA (Ley 209 de 2021, uso con cita de la fuente)", estaciones: est };
+  return cachedJSON("https://celeste.cache/panama/v3", 900, ctx, async () => {
+    const byId = new Map();
+    const rios = [];
+    await Promise.all(Object.entries(PA_SENSORS).map(async ([sensor, k]) => {
+      try {
+        const r = await fetch(`https://www.imhpa.gob.pa/es/estaciones-satelitales-data2?sensor=${encodeURIComponent(sensor)}`, { headers: { "User-Agent": "CelesteApp/0.1 (visor climatico)" } });
+        if (!r.ok) return;
+        const j = await r.json();
+        Object.values(j.estaciones || {}).forEach((e) => {
+          const lat = num(e.latitud), lon = num(e.longitud);
+          if (lat == null || lon == null || lat >= 10.5 || lon >= -81.0) return;
+          const v = Number.isFinite(e.sensor_valor_sin_format) ? e.sensor_valor_sin_format : num(e.sensor_valor);
+          const unit = String(e.sensor_valor || "").replace(/^[-\d.,\s]+/, "").trim();
+          const iso = paDate(e.sensor_fecha);
+          if (k === "nivel") { rios.push([e.nombre, lat, lon, v, unit, iso]); return; }
+          const id = e.numero_estacion || e.nombre;
+          if (!byId.has(id)) byId.set(id, { id: String(e.numero_estacion || ""), n: e.nombre, lat, lon, v: {} });
+          byId.get(id).v[k] = [v, iso, unit];
+        });
+      } catch (err) { /* sensor sin respuesta */ }
+    }));
+    const est = [...byId.values()].map((s) => [s.n, s.lat, s.lon, s.v.lluvia ? s.v.lluvia[0] : null, s.v.lluvia ? s.v.lluvia[1] : null, s.v, s.id]);
+    return { fuente: "IMHPA (Ley 209 de 2021, uso con cita de la fuente)", estaciones: est, rios };
   });
+}
+
+// Panamá (IMHPA): serie de lluvia cada 15 min de cada estación → lluvia por hora de las últimas 25 horas.
+// IMHPA guarda la hora local de Panamá (UTC−5) como si fuera UTC: se corrige sumando 5 horas.
+async function panamaSeries(url, ctx) {
+  const ids = (url.searchParams.get("e") || "").split(",").filter((t) => /^\d{4,9}$/.test(t)).slice(0, 12);
+  if (!ids.length) return json({ error: "Sin estaciones." }, 400);
+  const out = {};
+  await Promise.all(ids.map(async (id) => {
+    try {
+      const r = await cachedJSON(`https://celeste.cache/panama/serie/${id}`, 900, ctx, async () => {
+        const up = await fetch(`https://www.imhpa.gob.pa/es/estaciones-satelitales-data?estacion=${id}&sensor=LLUVIA&ajax=1`, { headers: { "User-Agent": "CelesteApp/0.1 (visor climatico)" } });
+        if (!up.ok) return { filas: [] };
+        const j = await up.json();
+        let d = j.datos;
+        if (typeof d === "string") { try { d = JSON.parse(d); } catch (e) { d = []; } }
+        if (!Array.isArray(d)) return { filas: [] };
+        const pts = d.filter((p) => Array.isArray(p) && Number.isFinite(p[0])).map((p) => [p[0] + 5 * 3600000, Number(p[1]) || 0]);
+        if (!pts.length) return { filas: [] };
+        const last = pts[pts.length - 1][0];
+        const endH = Math.floor(last / 3600000) * 3600000; // última hora completa
+        const hours = new Map();
+        pts.forEach(([t, v]) => {
+          if (t <= endH - 25 * 3600000 || t > endH) return;
+          const h = Math.ceil(t / 3600000) * 3600000; // lluvia de la hora que termina en h
+          const o = hours.get(h) || { s: 0, n: 0 };
+          o.s += v; o.n++;
+          hours.set(h, o);
+        });
+        const filas = [...hours.entries()].filter(([, o]) => o.n >= 3).sort((a, b) => b[0] - a[0]).map(([h, o]) => [new Date(h).toISOString(), Math.round(o.s * 10) / 10]);
+        return { filas, ultimo: new Date(last).toISOString() };
+      });
+      out[id] = await r.clone().json();
+    } catch (e) { out[id] = { filas: [] }; }
+  }));
+  return json({ estaciones: out }, 200, { "Cache-Control": "public, max-age=300" });
 }
 
 // Aeropuertos (METAR): estado del tiempo cada hora
