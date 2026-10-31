@@ -92,6 +92,19 @@
     }
   })();
 
+  // Rejilla gruesa (1/3) para el modelo: es suave por naturaleza y luego se interpola
+  const CWd = Math.ceil(W / 3), CHd = Math.ceil(H / 3);
+  const coarseLat = new Float32Array(CWd * CHd), coarseLng = new Float32Array(CWd * CHd);
+  for (let j = 0; j < CHd; j++) for (let i = 0; i < CWd; i++) {
+    const k = Math.min(H - 1, j * 3 + 1) * W + Math.min(W - 1, i * 3 + 1);
+    coarseLat[j * CWd + i] = cellLat[k]; coarseLng[j * CWd + i] = cellLng[k];
+  }
+  function modelField(model, name, tSec, positive) {
+    const c = new Float32Array(CWd * CHd);
+    for (let q = 0; q < c.length; q++) { const v = modelAt(model, name, tSec, coarseLat[q], coarseLng[q]); c[q] = positive ? Math.max(0, v) : v; }
+    return C.resample(c, CWd, CHd, W, H);
+  }
+
   function bilinear(g, w, h, x, y) {
     if (x < 0 || y < 0 || x > w - 1 || y > h - 1) return 0;
     const x0 = Math.floor(x), y0 = Math.floor(y), x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1);
@@ -179,7 +192,7 @@
   }
 
   // ---------- Modelo numérico ----------
-  function modelAt(model, name, tSec, k) {
+  function modelAt(model, name, tSec, lat, lng) {
     // Interpolación temporal lineal entre horas y espacial bilineal en la rejilla de 0,3°
     const { times, lats, lons, vars } = model;
     const arr = vars[name];
@@ -188,7 +201,7 @@
     while (a < times.length - 2 && times[a + 1] <= tSec) a++;
     const f = clamp((tSec - times[a]) / (times[a + 1] - times[a]));
     const step = lats[1] - lats[0];
-    const fi = (cellLng[k] - lons[0]) / step, fj = (cellLat[k] - lats[0]) / step;
+    const fi = (lng - lons[0]) / step, fj = (lat - lats[0]) / step;
     const val = (ti) => {
       const i0 = clamp(Math.floor(fi), 0, nx - 1), j0 = clamp(Math.floor(fj), 0, ny - 1);
       const i1 = Math.min(nx - 1, i0 + 1), j1 = Math.min(ny - 1, j0 + 1);
@@ -207,10 +220,10 @@
     computing = true;
     setStatus("Leyendo radar y modelo…");
     try {
-      const [radar, model] = await Promise.all([loadRadar().catch(() => null), fetch("/api/celeste/modelo").then((r) => {
+      const [radar, model] = await Promise.all([loadRadar().catch(() => null), loadMask(), fetch("/api/celeste/modelo").then((r) => {
         if (!r.ok) throw new Error("modelo");
         return r.json();
-      })]);
+      })]).then(([r, , m]) => [r, m]);
       radarOK = !!radar;
       t0 = radar ? new Date(radar.time) : new Date(Math.floor(Date.now() / 600000) * 600000);
       setStatus(radarOK ? "Calculando el movimiento de la lluvia…" : "Sin radar en este momento: se usa solo el modelo.");
@@ -244,8 +257,7 @@
       for (let si = 0; si < STEPS.length; si++) {
         const L = STEPS[si];
         const tSec = t0.getTime() / 1000 + L * 60;
-        const comps = {};
-        COMPS.forEach((c) => (comps[c.key] = new Float32Array(N)));
+        const comps = { rain: new Float32Array(N) };
         const radarRain = new Float32Array(N);
         const decay = Math.exp(-L / 150);
         const wTime = clamp(1 - L / BLEND_END);
@@ -265,23 +277,15 @@
         }
         // Difuminado creciente: la incertidumbre aumenta con el plazo
         const rr = useRadar ? C.blur(radarRain, W, H, 0.9 + (L / 60) * 1.6) : radarRain;
-        const modelRain = new Float32Array(N), cape = comps.cape, gust = comps.gust, pp = comps.pp, heat = comps.heat;
-        for (let k = 0; k < N; k++) {
-          modelRain[k] = Math.max(0, modelAt(model, "precipitation", tSec + 1800, k));
-          cape[k] = modelAt(model, "cape", tSec, k);
-          gust[k] = modelAt(model, "wind_gusts_10m", tSec + 1800, k);
-          pp[k] = modelAt(model, "precipitation_probability", tSec + 1800, k);
-          heat[k] = modelAt(model, "apparent_temperature", tSec, k);
-        }
-        const mr = C.blur(modelRain, W, H, 3);
+        const mr = modelField(model, "precipitation", tSec + 1800, true);
+        comps.cape = modelField(model, "cape", tSec, true);
+        comps.gust = modelField(model, "wind_gusts_10m", tSec + 1800, true);
+        comps.pp = modelField(model, "precipitation_probability", tSec + 1800, true);
+        comps.heat = modelField(model, "apparent_temperature", tSec, false);
         for (let k = 0; k < N; k++) {
           const wr = latest ? radW[k] * wTime : 0;
           comps.rain[k] = wr * (Number.isFinite(rr[k]) ? rr[k] : 0) + (1 - wr) * (Number.isFinite(mr[k]) ? mr[k] : 0);
         }
-        ["cape", "gust", "pp", "heat"].forEach((key) => {
-          const sm = C.blur(comps[key], W, H, 2.5);
-          for (let k = 0; k < N; k++) comps[key][k] = Number.isFinite(sm[k]) ? sm[k] : comps[key][k];
-        });
         const st = { min: L, time: new Date(t0.getTime() + L * 60000), comps };
         steps.push(st);
         computeIndex(st);
@@ -347,19 +351,60 @@
     const wsum = COMPS.reduce((s, c) => s + c.w, 0) || 1;
     const idx = new Float32Array(N);
     for (let k = 0; k < N; k++) {
+      if (mask && !mask[k]) { idx[k] = NaN; continue; }
       let s = 0;
       for (const c of COMPS) if (c.w) s += c.w * c.score(st.comps[c.key][k]);
       idx[k] = (100 * s) / wsum;
     }
     st.index = idx;
     const sample = [];
-    for (let k = 0; k < N; k += 7) sample.push(idx[k]);
+    for (let k = 0; k < N; k += 5) if (Number.isFinite(idx[k])) sample.push(idx[k]);
     sample.sort((a, b) => a - b);
     st.p90 = sample[Math.floor(sample.length * 0.9)] || 0;
     st.max = sample[sample.length - 1] || 0;
-    const old = st.layer;
-    st.layer = layerOf(C.polygons(idx, W, H, AREA.bbox, IDX));
-    if (old && map.hasLayer(old)) { map.removeLayer(old); if (active && steps[cur] === st) st.layer.addTo(map); }
+    const wasShown = st.layer && map.hasLayer(st.layer);
+    if (st.layer) map.removeLayer(st.layer);
+    st.layer = null; // se dibuja cuando se muestra
+    if (wasShown && active && steps[cur] === st) ensureLayer(st).addTo(map);
+  }
+
+  function ensureLayer(st) {
+    if (!st.layer) st.layer = layerOf(C.polygons(st.index, W, H, AREA.bbox, IDX));
+    return st.layer;
+  }
+
+  // Silueta de Costa Rica (Natural Earth 1:50 m) con una franja costera de ~10 km
+  let mask = null;
+  async function loadMask() {
+    if (mask) return mask;
+    try {
+      const topo = await fetch("https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-50m.json").then((r) => r.json());
+      const geo = topojson.feature(topo, topo.objects.countries);
+      const cr = geo.features.find((f) => String(f.id) === "188");
+      if (!cr) return null;
+      const cv = document.createElement("canvas");
+      cv.width = W; cv.height = H;
+      const ctx = cv.getContext("2d", { willReadFrequently: true });
+      const [x0, y0, x1, y1] = AREA.bbox;
+      ctx.fillStyle = "#000";
+      ctx.beginPath();
+      const polys = cr.geometry.type === "Polygon" ? [cr.geometry.coordinates] : cr.geometry.coordinates;
+      polys.forEach((poly) => poly.forEach((ring) => ring.forEach(([lng, lat], i) => {
+        const [X, Y] = C.merc(lat, lng);
+        const px = ((X - x0) / (x1 - x0)) * W, py = ((y1 - Y) / (y1 - y0)) * H;
+        i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+      })));
+      ctx.fill("evenodd");
+      const a = ctx.getImageData(0, 0, W, H).data;
+      const m = new Float32Array(N);
+      for (let k = 0; k < N; k++) m[k] = a[k * 4 + 3] / 255;
+      const soft = C.blur(m, W, H, 7);
+      mask = new Uint8Array(N);
+      for (let k = 0; k < N; k++) mask[k] = soft[k] > 0.1 ? 1 : 0;
+      return mask;
+    } catch (e) {
+      return null;
+    }
   }
 
   // ---------- Línea de tiempo ----------
@@ -396,7 +441,7 @@
     const prev = steps[cur];
     cur = i;
     const st = steps[cur];
-    if (active && st.layer && !map.hasLayer(st.layer)) st.layer.addTo(map);
+    if (active) { const lyr = ensureLayer(st); if (!map.hasLayer(lyr)) lyr.addTo(map); }
     if (prev && prev !== st && prev.layer) map.removeLayer(prev.layer);
     [...bars.children].forEach((b, j) => {
       b.classList.toggle("current", j === cur);
@@ -513,8 +558,9 @@
     const k = j * W + i;
     const st = steps[cur];
     const v = st.index[k];
+    if (!Number.isFinite(v)) return `<h3>Índice CELESTE</h3><p class="muted">El índice se calcula sobre Costa Rica y su franja costera. Toca un punto dentro del país.</p>`;
     const wsum = COMPS.reduce((s, c) => s + c.w, 0) || 1;
-    const series = steps.map((s) => s.index[k]);
+    const series = steps.map((s) => (Number.isFinite(s.index[k]) ? s.index[k] : 0));
     const peak = series.indexOf(Math.max(...series));
     const parts = COMPS.map((c) => ({ c, raw: st.comps[c.key][k], pts: (100 * c.w * c.score(st.comps[c.key][k])) / wsum }));
     const maxPts = Math.max(1, ...parts.map((p) => p.pts));
