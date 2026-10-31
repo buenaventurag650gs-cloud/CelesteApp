@@ -407,7 +407,7 @@
         loadMask(),
         fetch("/api/celeste/modelo").then((r) => { if (!r.ok) throw new Error("modelo"); return r.json(); }),
         C.stations && C.stations.serie ? C.stations.serie().catch(() => null) : null,
-        loadSat("goesrain", 7, 8).catch(() => null),
+        loadSat("goesrain", 7, 16).catch(() => null),
         loadSat("imerg30", 12, 16).catch(() => null),
       ]);
       radarOK = !!radar;
