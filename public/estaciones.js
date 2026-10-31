@@ -21,7 +21,8 @@
     if (loading) return loading;
     loading = (async () => {
       const meta = await fetch("/datos/estaciones-imn.json").then((r) => r.json());
-      const list = meta.estaciones.map(([n, t, lat, lon, q]) => ({ n, t, lat, lon, q, rows: [] }));
+      const all = meta.estaciones.map(([n, t, lat, lon, q]) => ({ n, t, lat, lon, q, rows: [], cols: [], filas: [] }));
+      const list = all.filter((s) => s.t);
       const chunks = [];
       for (let i = 0; i < list.length; i += 12) chunks.push(list.slice(i, i + 12)); // límite de subconsultas del plan gratuito
       const [batches, pa, air] = await Promise.all([
@@ -30,11 +31,19 @@
         fetch("/api/estaciones/aeropuertos").then((r) => r.json()).catch(() => ({ aeropuertos: [] })),
       ]);
       const byT = new Map(list.map((s) => [s.t, s]));
-      batches.forEach((b) => Object.entries(b.estaciones || {}).forEach(([t, rows]) => {
+      batches.forEach((b) => Object.entries(b.estaciones || {}).forEach(([t, d]) => {
         const s = byT.get(t);
-        if (s) s.rows = rows.map(([iso, r, tp]) => [Date.parse(iso), r, tp]).filter((x) => Number.isFinite(x[0])).sort((a, b) => b[0] - a[0]);
+        if (!s) return;
+        const rows = Array.isArray(d) ? d : d.filas || [];
+        s.cols = Array.isArray(d) ? ["Lluvia", "Temp"] : d.cols || [];
+        const iR = s.cols.findIndex((c) => /lluvia/i.test(c));
+        const iT = s.cols.findIndex((c) => /^temp/i.test(c));
+        s.filas = rows.map((f) => [Date.parse(f[0])].concat(f.slice(1))).filter((x) => Number.isFinite(x[0])).sort((a, b) => b[0] - a[0]);
+        // Filas de lluvia y temperatura (solo estaciones que miden lluvia)
+        s.rows = iR >= 0 ? s.filas.map((f) => [f[0], f[iR + 1], iT >= 0 ? f[iT + 1] : null]) : [];
       }));
       cache = {
+        all,
         imn: list.filter((s) => s.rows.length),
         pa: (pa.estaciones || []).map(([n, lat, lon, mm, iso]) => ({ n, lat, lon, mm, time: iso ? Date.parse(iso) : null })),
         air: air.aeropuertos || [],

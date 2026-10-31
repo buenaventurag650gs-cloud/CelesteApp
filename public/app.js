@@ -302,34 +302,80 @@
   // Área de las capas de datos: Costa Rica con mar alrededor
   const FIELD_AREA = [4.8, -90.5, 13.8, -78.5];
 
+  // Iconos por tipo de capa (trazo, 24×24)
+  const ICONS = {
+    radar: '<circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><path d="M12 12 L18.5 5.5"/><path d="M7.8 16.2a6 6 0 1 1 8.5 0"/><path d="M4.9 19.1a10 10 0 1 1 14.2 0"/>',
+    station: '<path d="M12 21V9"/><path d="M8 21h8"/><path d="M12 9l-5-2 5-2 5 2z"/><circle cx="7" cy="7" r="1.3"/><circle cx="17" cy="7" r="1.3"/><path d="M12 13h4l1.5 2"/>',
+    surface: '<path d="M3 17c3-4 5 2 9-2s6 0 9-3"/><path d="M3 12c3-4 5 2 9-2s6 0 9-3"/><path d="M12 21v-3M8 21v-1.5M16 21v-2"/>',
+    satellite: '<rect x="9" y="9" width="6" height="6" rx="1" transform="rotate(45 12 12)"/><path d="M5.5 5.5l3 3M15.5 15.5l3 3"/><rect x="2.5" y="2.5" width="4" height="4" transform="rotate(45 4.5 4.5)"/><rect x="17.5" y="17.5" width="4" height="4" transform="rotate(45 19.5 19.5)"/><path d="M17 4a4 4 0 0 1 3 3"/>',
+    cloud: '<path d="M7 18h10a4 4 0 0 0 .5-8A6 6 0 0 0 6 11a3.5 3.5 0 0 0 1 7z"/>',
+    drop: '<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>',
+    wave: '<path d="M3 9c2.5-2 4.5-2 7 0s4.5 2 7 0 3-1 4-1"/><path d="M3 15c2.5-2 4.5-2 7 0s4.5 2 7 0 3-1 4-1"/>',
+    thermo: '<path d="M10 14V5a2 2 0 0 1 4 0v9a4 4 0 1 1-4 0z"/><path d="M12 9v7"/>',
+    leaf: '<path d="M5 19c0-9 6-14 15-14 0 9-5 15-14 15"/><path d="M5 19l8-8"/>',
+    dust: '<circle cx="6" cy="8" r="1.2"/><circle cx="12" cy="6" r="1.2"/><circle cx="18" cy="9" r="1.2"/><circle cx="9" cy="13" r="1.2"/><circle cx="15" cy="14" r="1.2"/><circle cx="7" cy="18" r="1.2"/><circle cx="17" cy="19" r="1.2"/>',
+    flame: '<path d="M12 3c1 4 5 5.5 5 10a5 5 0 0 1-10 0c0-2.5 1.5-4 2.5-5 .3 2 1.2 3 2 3 0-3-1-5.5.5-8z"/>',
+    region: '<path d="M4 6l5-2 6 2 5-2v14l-5 2-6-2-5 2z"/><path d="M9 4v14M15 6v14" stroke-dasharray="2 2"/>',
+  };
+  const icon = (k) => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICONS[k] || ""}</svg>`;
+  // Fuentes: sigla, país y color de la ficha
+  const SOURCES = {
+    cocesna: { name: "COCESNA", cc: "NI", cls: "src-ni", title: "Radar de COCESNA en Nicaragua" },
+    imn: { name: "IMN", cc: "CR", cls: "src-cr", title: "Instituto Meteorológico Nacional de Costa Rica" },
+    imhpa: { name: "IMHPA", cc: "PA", cls: "src-pa", title: "Instituto de Meteorología e Hidrología de Panamá" },
+    nasa: { name: "NASA", cc: "", cls: "src-nasa", title: "NASA GIBS" },
+    noaa: { name: "NOAA", cc: "", cls: "src-nasa", title: "NOAA GOES-Este vía NASA GIBS" },
+    snit: { name: "SNIT", cc: "CR", cls: "src-cr", title: "Sistema Nacional de Información Territorial (nodo IMN)" },
+  };
+  const chip = (k) => { const s = SOURCES[k]; return s ? `<span class="src ${s.cls}" title="${s.title}">${s.name}${s.cc ? `<i>${s.cc}</i>` : ""}</span>` : ""; };
+
   const GROUPS = [
     {
-      title: "Lluvia",
+      title: "Fuentes del índice CELESTE",
+      note: "Datos medidos en Nicaragua, Costa Rica y Panamá.",
+      core: true,
       layers: [
-        { key: "radar", type: "radar", name: "Radar de lluvia", desc: "COCESNA, cada 10 minutos. Cubre el norte y el centro del país.", on: true, opacity: 0.8, pal: "rain" },
-        { key: "imerg30", type: "field", id: "IMERG_Precipitation_Rate_30min", name: "Lluvia estimada por satélite", desc: "NASA IMERG, cada 30 minutos con unas horas de retraso. Cubre todo el país.", opacity: 0.75, pal: "rain", srcWidth: 124, sigma: 6 },
-        { key: "radarimn", type: "ext", pane: "radarimn", name: "Radar del IMN (Valle Central)", desc: "IMN, Aranjuez. Misma unidad, escala y suavizado que el de COCESNA.", opacity: 0.8 },
-        { key: "estaciones", type: "ext", pane: "estaciones", name: "Lluvia medida en estaciones", desc: "IMN cada hora y Panamá (IMHPA), trasladadas a una superficie continua. Lo que de verdad cayó.", opacity: 0.85 },
-        { key: "imergday", type: "field", id: "IMERG_Precipitation_Rate", name: "Lluvia del último día", desc: "NASA IMERG, total del día anterior.", opacity: 0.75, pal: "rainDay", srcWidth: 124, sigma: 6, scale: 24 },
+        { key: "radar", type: "radar", icon: "radar", src: "cocesna", name: "Radar de lluvia de COCESNA", desc: "Cada 10 minutos. Cubre el norte y el centro del país.", on: true, opacity: 0.8, pal: "rain" },
+        { key: "radarimn", type: "ext", icon: "radar", src: "imn", pane: "radarimn", name: "Radar del IMN (Valle Central)", desc: "Aranjuez. Misma unidad, escala y suavizado que el de COCESNA.", opacity: 0.8 },
+        { key: "redimn", type: "ext", icon: "station", src: "imn", pane: "redimn", name: "Estaciones automáticas del IMN", desc: "Las 153 estaciones, su área de influencia y lo que reportan.", opacity: 1 },
+        { key: "estaciones", type: "ext", icon: "surface", src: "imn", pane: "estaciones", name: "Lluvia de estaciones, hora a hora ±6 h", desc: "Lo medido por las estaciones, trasladado a una superficie continua, y su pronóstico.", opacity: 0.85 },
+        { key: "redpa", type: "ext", icon: "station", src: "imhpa", pane: "redpa", name: "Estaciones de Panamá", desc: "Occidente de Panamá, lluvia de 24 horas y área de influencia.", opacity: 1 },
+      ],
+    },
+    {
+      title: "Lluvia por satélite",
+      more: true,
+      layers: [
+        { key: "imerg30", type: "field", icon: "drop", src: "nasa", id: "IMERG_Precipitation_Rate_30min", name: "Lluvia estimada por satélite", desc: "IMERG, cada 30 minutos con unas horas de retraso. Cubre todo el país.", opacity: 0.75, pal: "rain", srcWidth: 124, sigma: 6 },
+        { key: "imergday", type: "field", icon: "drop", src: "nasa", id: "IMERG_Precipitation_Rate", name: "Lluvia del último día", desc: "IMERG, total del día anterior.", opacity: 0.75, pal: "rainDay", srcWidth: 124, sigma: 6, scale: 24 },
       ],
     },
     {
       title: "Nubes",
+      more: true,
       layers: [
-        { key: "geocolor", type: "tiles", id: "GOES-East_ABI_GeoColor", level: 7, name: "Satélite en color real", desc: "GOES-Este, imagen más reciente. De noche muestra luces y nubes bajas.", opacity: 0.9 },
-        { key: "ir", type: "tiles", id: "GOES-East_ABI_Band13_Clean_Infrared", level: 6, name: "Nubes por temperatura", desc: "GOES-Este infrarrojo. Los topes más fríos son las tormentas más altas.", opacity: 0.7 },
-        { key: "dust", type: "tiles", id: "GOES-East_ABI_Dust", level: 7, name: "Polvo del Sahara", desc: "GOES-Este. El polvo aparece en tonos rosados.", opacity: 0.75 },
+        { key: "geocolor", type: "tiles", icon: "satellite", src: "noaa", id: "GOES-East_ABI_GeoColor", level: 7, name: "Satélite en color real", desc: "GOES-Este, imagen más reciente. De noche muestra luces y nubes bajas.", opacity: 0.9 },
+        { key: "ir", type: "tiles", icon: "cloud", src: "noaa", id: "GOES-East_ABI_Band13_Clean_Infrared", level: 6, name: "Nubes por temperatura", desc: "GOES-Este infrarrojo. Los topes más fríos son las tormentas más altas.", opacity: 0.7 },
+        { key: "dust", type: "tiles", icon: "dust", src: "noaa", id: "GOES-East_ABI_Dust", level: 7, name: "Polvo del Sahara", desc: "GOES-Este. El polvo aparece en tonos rosados.", opacity: 0.75 },
       ],
     },
     {
       title: "Mar y tierra",
+      more: true,
       layers: [
-        { key: "sst", type: "field", id: "GHRSST_L4_MUR_Sea_Surface_Temperature", name: "Temperatura del mar", desc: "GHRSST, diaria.", opacity: 0.8, pal: "sst", srcWidth: 860, sigma: 1.6 },
-        { key: "ssta", type: "field", id: "GHRSST_L4_MUR_Sea_Surface_Temperature_Anomalies", name: "Mar más caliente o más frío de lo normal", desc: "Anomalía diaria. Sirve para seguir El Niño y La Niña.", opacity: 0.8, pal: "ssta", srcWidth: 860, sigma: 1.6 },
-        { key: "lst", type: "field", id: "MODIS_Terra_L3_Land_Surface_Temp_8Day_Day", name: "Temperatura del suelo de día", desc: "MODIS, promedio de 8 días. Muestra islas de calor.", opacity: 0.75, pal: "lst", srcWidth: 860, sigma: 1.4 },
-        { key: "ndvi", type: "field", id: "VIIRS_SNPP_L3_NDVI_16Day", name: "Verdor de la vegetación", desc: "VIIRS, 16 días. Bajo en zonas secas o deforestadas.", opacity: 0.75, pal: "ndvi", srcWidth: 860, sigma: 1.4 },
-        { key: "aod", type: "field", id: "MODIS_Combined_MAIAC_L2G_AerosolOpticalDepth", name: "Partículas en el aire", desc: "MODIS, diaria. Humo, polvo y contaminación.", opacity: 0.75, pal: "aod", srcWidth: 680, sigma: 2 },
-        { key: "fires", type: "fires", name: "Focos de incendio", desc: "VIIRS, focos detectados ayer.", opacity: 1 },
+        { key: "sst", type: "field", icon: "wave", src: "nasa", id: "GHRSST_L4_MUR_Sea_Surface_Temperature", name: "Temperatura del mar", desc: "GHRSST, diaria.", opacity: 0.8, pal: "sst", srcWidth: 860, sigma: 1.6 },
+        { key: "ssta", type: "field", icon: "wave", src: "nasa", id: "GHRSST_L4_MUR_Sea_Surface_Temperature_Anomalies", name: "Mar más caliente o más frío de lo normal", desc: "Anomalía diaria. Sirve para seguir El Niño y La Niña.", opacity: 0.8, pal: "ssta", srcWidth: 860, sigma: 1.6 },
+        { key: "lst", type: "field", icon: "thermo", src: "nasa", id: "MODIS_Terra_L3_Land_Surface_Temp_8Day_Day", name: "Temperatura del suelo de día", desc: "MODIS, promedio de 8 días. Muestra islas de calor.", opacity: 0.75, pal: "lst", srcWidth: 860, sigma: 1.4 },
+        { key: "ndvi", type: "field", icon: "leaf", src: "nasa", id: "VIIRS_SNPP_L3_NDVI_16Day", name: "Verdor de la vegetación", desc: "VIIRS, 16 días. Bajo en zonas secas o deforestadas.", opacity: 0.75, pal: "ndvi", srcWidth: 860, sigma: 1.4 },
+        { key: "aod", type: "field", icon: "dust", src: "nasa", id: "MODIS_Combined_MAIAC_L2G_AerosolOpticalDepth", name: "Partículas en el aire", desc: "MODIS, diaria. Humo, polvo y contaminación.", opacity: 0.75, pal: "aod", srcWidth: 680, sigma: 2 },
+        { key: "fires", type: "fires", icon: "flame", src: "nasa", name: "Focos de incendio", desc: "VIIRS, focos detectados ayer.", opacity: 1 },
+      ],
+    },
+    {
+      title: "Referencia",
+      more: true,
+      layers: [
+        { key: "regiones", type: "ext", icon: "region", src: "snit", name: "Regiones climáticas del IMN", desc: "Las siete regiones oficiales en que el IMN agrupa sus estaciones.", opacity: 1, noOpacity: true },
       ],
     },
   ];
@@ -421,10 +467,11 @@
   function renderPanel() {
     const wrap = $("#layerGroups");
     wrap.innerHTML = "";
+    let more = null;
     GROUPS.forEach((g) => {
       const sec = document.createElement("section");
-      sec.className = "group";
-      sec.innerHTML = `<h2>${g.title}</h2>`;
+      sec.className = `group${g.core ? " group-core" : ""}`;
+      sec.innerHTML = `<h2>${g.title}</h2>${g.note ? `<p class="group-note">${g.note}</p>` : ""}`;
       g.layers.forEach((def) => {
         const box = document.createElement("div");
         box.className = "layer";
@@ -434,24 +481,34 @@
         box.innerHTML = `
           <label class="layer-row" for="${id}">
             <input type="checkbox" id="${id}">
-            <span><span class="layer-name">${def.name}</span><br><span class="layer-desc">${def.desc}</span></span>
+            <span class="layer-ico" aria-hidden="true">${icon(def.icon)}</span>
+            <span class="layer-txt"><span class="layer-top"><span class="layer-name">${def.name}</span>${chip(def.src)}</span><span class="layer-desc">${def.desc}</span></span>
           </label>
           <div class="layer-extra">
             ${def.type === "radar" ? productButtons() : ""}
             ${legend}
-            <div class="opacity"><span>Opacidad</span><input type="range" min="0.2" max="1" step="0.05" value="${def.opacity}" aria-label="Opacidad de ${def.name}"></div>
+            ${def.noOpacity ? "" : `<div class="opacity"><span>Opacidad</span><input type="range" min="0.2" max="1" step="0.05" value="${def.opacity}" aria-label="Opacidad de ${def.name}"></div>`}
             ${def.type === "radar" || def.type === "field" ? `<div class="stamp"${def.type === "radar" ? ' id="radarStamp"' : ""}></div>` : ""}
           </div>`;
         sec.appendChild(box);
         const chk = $("input[type=checkbox]", box);
         chk.addEventListener("change", () => toggle(def, chk.checked, box));
-        $(".opacity input", box).addEventListener("input", (e) => {
+        const op = $(".opacity input", box);
+        if (op) op.addEventListener("input", (e) => {
           def.opacity = parseFloat(e.target.value);
           if (def.pane) map.getPane(def.pane).style.opacity = def.opacity;
           else tiles.get(def.key)?.setOpacity(def.opacity);
         });
       });
-      wrap.appendChild(sec);
+      if (g.more) {
+        if (!more) {
+          more = document.createElement("details");
+          more.className = "more-layers";
+          more.innerHTML = `<summary><span>Más capas</span><span class="more-hint">Satélite, mar y tierra, referencia</span></summary>`;
+          wrap.appendChild(more);
+        }
+        more.appendChild(sec);
+      } else wrap.appendChild(sec);
     });
     ALL.filter((d) => d.on).forEach((d) => {
       const box = document.querySelector(`.layer[data-key="${d.key}"]`);
@@ -934,7 +991,7 @@
   // ---------- Inicio ----------
   window.Celeste = {
     map, $, PAL, ramp, steps, extent, merc, unmerc, resample, blur, polygons, legendHTML, bandColor,
-    readPixels, fmtHour, fmtDay, fmtNum, fmtNum1, ago, isToday, toast, openPoint, closePoint, wireTips,
+    readPixels, fmtHour, fmtDay, fmtNum, fmtNum1, fmtNum2, ago, icon, isToday, toast, openPoint, closePoint, wireTips,
     RADAR_AREA, radarRain, pointHooks: [], ext: {},
   };
   setBase(baseKey);

@@ -40,6 +40,7 @@ export default {
       if (url.pathname === "/api/celeste/modelo") return modelGrid(ctx);
       if (url.pathname === "/api/estaciones/imn") return imnStations(url, ctx);
       if (url.pathname === "/api/radar/imn") return imnRadar(ctx);
+      if (url.pathname === "/api/imn/regiones") return imnRegions(ctx);
       if (url.pathname === "/api/estaciones/panama") return panamaStations(ctx);
       if (url.pathname === "/api/estaciones/aeropuertos") return airports(ctx);
       if (url.pathname === "/api/salud") return json({ ok: true, hora: new Date().toISOString() });
@@ -327,27 +328,32 @@ async function cachedJSON(key, maxAge, ctx, produce) {
 // IMN: tablas horarias de las estaciones automáticas (datos preliminares, sin control de calidad)
 function parseIMNDate(s) {
   // "31/10/2026 10:00 a. m."
-  const m = s.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*([ap])/i);
+  const m = s.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*([ap])/i);
   if (!m) return null;
   let h = parseInt(m[4], 10) % 12;
   if (m[6].toLowerCase() === "p") h += 12;
   return `${m[3]}-${m[2]}-${m[1]}T${String(h).padStart(2, "0")}:${m[5]}:00-06:00`;
 }
-const num = (s) => { const n = parseFloat(String(s).replace(",", ".")); return Number.isFinite(n) ? n : null; };
+// Números en formato del IMN: "1.001,10", "1 006,83", "0,20"
+const num = (s) => {
+  let v = String(s).replace(/[\s\u00a0\u202f]/g, "");
+  if (v.includes(",")) v = v.replace(/\./g, "").replace(",", ".");
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : null;
+};
 
 async function imnTable(t, ctx) {
-  return cachedJSON(`https://celeste.cache/imn/${t}`, 600, ctx, async () => {
+  return cachedJSON(`https://celeste.cache/imn3/${t}`, 600, ctx, async () => {
     const r = await fetch(`https://www.imn.ac.cr/especial/tablas/${t}.html`, { headers: { "User-Agent": "CelesteApp/0.1 (visor climatico)" } });
     if (!r.ok) return { t, filas: [] };
     const html = await r.text();
     const rows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].map((m) =>
       [...m[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((c) => c[1].replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim()));
     if (!rows.length) return { t, filas: [] };
-    const head = rows[0].map((h) => h.toLowerCase());
-    const iR = head.findIndex((h) => h.includes("lluvia"));
-    const iT = head.findIndex((h) => h.startsWith("temp"));
-    const filas = rows.slice(1, 25).map((c) => [parseIMNDate(c[0] || ""), iR >= 0 ? num(c[iR]) : null, iT >= 0 ? num(c[iT]) : null]).filter((f) => f[0]);
-    return { t, filas };
+    // Todas las variables que publica la estación (temperatura, lluvia, viento, presión, radiación…)
+    const cols = rows[0].slice(1).map((h) => h.trim());
+    const filas = rows.slice(1, 25).map((c) => [parseIMNDate(c[0] || ""), ...cols.map((_, i) => num(c[i + 1]))]).filter((f) => f[0]);
+    return { t, cols, filas };
   });
 }
 
@@ -356,7 +362,7 @@ async function imnStations(url, ctx) {
   if (!list.length) return json({ error: "Sin estaciones." }, 400);
   const out = {};
   await Promise.all(list.map(async (t) => {
-    try { const r = await imnTable(t, ctx); const j = await r.clone().json(); out[t] = j.filas; } catch (e) { out[t] = []; }
+    try { const r = await imnTable(t, ctx); const j = await r.clone().json(); out[t] = { cols: j.cols || [], filas: j.filas }; } catch (e) { out[t] = { cols: [], filas: [] }; }
   }));
   return json({ estaciones: out }, 200, { "Cache-Control": "public, max-age=300" });
 }
@@ -381,6 +387,33 @@ async function imnRadar(ctx) {
   });
   ctx.waitUntil(cache.put(key, res.clone()));
   return res;
+}
+
+// Regiones climáticas oficiales del IMN (nodo IMN del SNIT, servidor SINIA), simplificadas
+async function imnRegions(ctx) {
+  return cachedJSON("https://celeste.cache/imn/regiones", 604800, ctx, async () => {
+    const r = await fetch("https://geodatos.sinia.go.cr/geoserver/IMN/wfs?service=WFS&version=2.0.0&request=GetFeature&typeNames=IMN:reg_climaticas_imn&outputFormat=application/json&srsName=EPSG:4326");
+    if (!r.ok) return { type: "FeatureCollection", features: [] };
+    const j = await r.json();
+    const round = (ring) => {
+      const out = [];
+      let last = null;
+      for (const [x, y] of ring) {
+        const p = [Math.round(x * 1000) / 1000, Math.round(y * 1000) / 1000];
+        if (!last || p[0] !== last[0] || p[1] !== last[1]) out.push(p);
+        last = p;
+      }
+      return out;
+    };
+    return {
+      type: "FeatureCollection",
+      features: j.features.map((f) => ({
+        type: "Feature",
+        properties: { region: String(f.properties.region || "").replace(/^Regi[oó]n\s*/i, "").replace(/^Central$/, "Valle Central").replace(/^Norte$/, "Zona Norte") },
+        geometry: { type: "MultiPolygon", coordinates: (f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates).map((poly) => poly.map(round).filter((ring) => ring.length >= 4)) },
+      })),
+    };
+  });
 }
 
 // Panamá (IMHPA): lluvia acumulada de 24 horas en estaciones de la región occidental
