@@ -170,7 +170,7 @@
           a += tv[yy * w + x] * kk; b += tm[yy * w + x] * kk;
         }
         const i = y * w + x;
-        out[i] = b > 0.5 && msk[i] + b > 0.9 ? a / b : NaN;
+        out[i] = b > 0.32 && msk[i] + b > 0.55 ? a / b : NaN;
       }
     }
     return out;
