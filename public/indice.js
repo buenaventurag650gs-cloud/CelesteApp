@@ -85,6 +85,7 @@
   let radarOK = false;
   let calib = null; // {factor, n}
   let calibG = null; // sesgo de GOES frente a estaciones
+  let goesFactor = 0.5;
   let sourcesUsed = null;
   let computing = false;
   let computedAt = 0;
@@ -361,7 +362,7 @@
       let num = w.model * (Number.isFinite(mr[k]) ? mr[k] : 0), den = w.model;
       if (P.rr && w.radar) { const q = radW[k] * P.wTime; if (q > 0) { num += w.radar * q * P.rr[k] / 100; den += w.radar * q; } }
       if (P.est && w.est) { const q = (eq ? eq[k] / 255 : 0) * P.est.decay; const v = P.est.grid[k]; if (q > 0 && Number.isFinite(v)) { num += w.est * q * v; den += w.est * q; } }
-      if (P.goes && w.goes) { const v = P.goes[k]; if (Number.isFinite(v)) { const q = P.goesQ; num += w.goes * q * v * P.goesF; den += w.goes * q; } }
+      if (P.goes && w.goes) { const v = P.goes[k]; if (Number.isFinite(v)) { const q = P.goesQ; num += w.goes * q * v * goesFactor; den += w.goes * q; } }
       if (P.imerg && w.imerg) { const v = P.imerg[k]; if (Number.isFinite(v)) { num += w.imerg * v; den += w.imerg; } }
       rain[k] = den > 0 ? num / den : 0;
     }
@@ -417,8 +418,11 @@
       // GOES: imágenes para los pasos observados (en paralelo) y calibración con estaciones
       if (goes) STEPS.forEach((L) => { if (L <= 0) { const t = goes.pick(t0.getTime() + L * 60000); if (t) goes.get(t); } });
       if (imerg) STEPS.forEach((L) => { if (L <= 0) { const t = imerg.pick(t0.getTime() + L * 60000); if (t) imerg.get(t); } });
-      calibG = goes ? await calibrateSat(goes, t0.getTime()) : null;
-      const goesF = calibG && calibG.used ? calibG.factor : 0.6;
+      // La calibración de GOES corre en paralelo; mientras tanto se usa un factor prudente y luego se recombina
+      calibG = null;
+      goesFactor = 0.5;
+      const calibProm = goes ? calibrateSat(goes, t0.getTime()).catch(() => null) : Promise.resolve(null);
+      const goesF = null;
       setStatus(radarOK ? "Calculando el movimiento de la lluvia…" : "Sin radar en este momento: se combinan estaciones, satélites y modelo.");
       await pause();
 
@@ -518,6 +522,12 @@
         else drawBars();
         await pause();
       }
+      calibG = await calibProm;
+      if (calibG && calibG.used) {
+        goesFactor = calibG.factor;
+        steps.forEach((s) => { if (s && s.parts.goes) { combineRain(s); computeIndex(s); } });
+        drawBars(); show(cur);
+      }
       computedAt = Date.now();
       const motionTxt = motion ? ` La lluvia se desplaza hacia ${direction(motion.meanX, motion.meanY)} a unos ${C.fmtNum.format(speedKmh(motion.meanX, motion.meanY))} km/h.` : "";
       const mos = radar && radar.mosaic;
@@ -530,7 +540,7 @@
       if (used.imerg) parts.push(`IMERG en ${used.imerg} pasos`);
       parts.push("modelo");
       sourcesUsed = used;
-      setStatus(`Lluvia combinada de ${parts.join(", ")}. Radar de las ${radarOK ? C.fmtHour.format(t0) : "—"}.${motionTxt}${calibTxt}${mosTxt}`);
+      setStatus(`Lluvia combinada de ${parts.join(", ")}.${radarOK ? ` Radar de las ${C.fmtHour.format(t0)}`.replace(/\.?$/, ".") : ""}${motionTxt}${calibTxt}${mosTxt}`);
       renderWeights();
       $("#idxTimeline").hidden = !active;
     } catch (err) {
@@ -836,7 +846,7 @@
     const rows = [];
     if (P.rr && radW[k] * P.wTime > 0) rows.push(["Radar COCESNA" + (st.min > 0 ? " (proyectado)" : ""), w.radar * radW[k] * P.wTime, P.rr[k] / 100]);
     if (P.est && P.est.q && P.est.q[k] > 0 && Number.isFinite(P.est.grid[k])) rows.push(["Estaciones ±6 h" + (st.min > 0 ? " (pronóstico)" : ""), w.est * (P.est.q[k] / 255) * P.est.decay, P.est.grid[k]]);
-    if (P.goes && Number.isFinite(P.goes[k])) rows.push(["GOES-Este" + (st.min > 0 ? " (desplazado)" : ""), w.goes * P.goesQ, P.goes[k] * P.goesF]);
+    if (P.goes && Number.isFinite(P.goes[k])) rows.push(["GOES-Este" + (st.min > 0 ? " (desplazado)" : ""), w.goes * P.goesQ, P.goes[k] * goesFactor]);
     if (P.imerg && Number.isFinite(P.imerg[k])) rows.push(["IMERG", w.imerg, P.imerg[k]]);
     rows.push(["Modelo numérico", w.model, mrv]);
     const tot = rows.reduce((s, r) => s + r[1], 0) || 1;
