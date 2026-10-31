@@ -37,7 +37,7 @@
       i: '<circle cx="8.5" cy="8.5" r="3.3"/><path d="M8.5 2.3v1.5M2.3 8.5h1.5M4.1 4.1l1.1 1.1M12.9 4.1l-1.1 1.1"/><path d="M10 20h8a3 3 0 0 0 .3-6 4.5 4.5 0 0 0-8.6 1.2A2.4 2.4 0 0 0 10 20z"/>' },
     { n: "Nubladillo", d: "Cielo parcialmente nublado.", rule: "Nubosidad del 45 al 80 %, sin lluvia.",
       i: '<path d="M14.6 5.6a3.6 3.6 0 0 1 5.6 3.4"/><path d="M17.5 2.5v1.3M22 7.5h-1.3M20.8 3.9l-.9.9"/><path d="M5.5 20h10a3.6 3.6 0 0 0 .4-7.2A5.5 5.5 0 0 0 5.3 14a3 3 0 0 0 .2 6z"/>' },
-    { n: "Amenazando", d: "Se está cerrando el cielo, posibles lluvias.", rule: "Sin lluvia aún, pero nubosidad mayor al 80 %, o nublado con probabilidad de lluvia ≥ 50 % o con potencial de tormenta alto.",
+    { n: "Amenazando", d: "Se está cerrando el cielo, posibles lluvias.", rule: "Lluvia apenas perceptible (menos de 0,2 mm/h), nubosidad mayor al 80 %, o nublado con probabilidad de lluvia ≥ 50 % o potencial de tormenta alto.",
       i: `<path d="${CLOUD}" fill="currentColor" fill-opacity=".35"/><path d="M9 18.5h6M10.5 21h3"/>` },
     { n: "Llovizna", d: "Lluvia ligera y pasajera.", rule: "Lluvia de 0,2 a 2,5 mm por hora.",
       i: `<path d="${CLOUD}"/><path d="M8 17.5v.01M12 18.5v.01M16 17.5v.01M10 21v.01M14 21v.01" stroke-width="2.6"/>` },
@@ -75,7 +75,7 @@
     if (R >= 7.6) return 60 + 9.9 * clamp(Math.log(R / 7.6) / Math.log(40 / 7.6));
     if (R >= 2.5) return 50 + 9.9 * clamp((R - 2.5) / 5.1);
     if (R >= 0.2) return 40 + 9.9 * clamp(Math.log(R / 0.2) / Math.log(12.5));
-    const threat = cloud >= 50 && (pp >= 50 || cape >= 1500);
+    const threat = R >= 0.05 || (cloud >= 50 && (pp >= 50 || cape >= 1500));
     if (cloud >= 80 || threat) return 30 + 9.9 * clamp(Math.max((cloud - 80) / 20, (pp - 50) / 50, (cape - 1500) / 1500, R / 0.2));
     if (cloud >= 45) return 20 + 9.9 * clamp((cloud - 45) / 35);
     if (cloud >= 20) return 10 + 9.9 * clamp((cloud - 20) / 25);
@@ -368,7 +368,7 @@
       const t = T[k];
       if (!Number.isFinite(t)) { rain[k] = NaN; cloud[k] = NaN; continue; }
       rain[k] = C.goesRain(t);
-      cloud[k] = 100 * clamp((18 - t) / 33);
+      cloud[k] = 100 * clamp((22 - t) / 27);
     }
     return { rain, cloud };
   }
@@ -456,7 +456,7 @@
       const [radar, , model, serie, goes, imerg] = await Promise.all([
         loadRadar().catch(() => null),
         loadMask(),
-        fetch("/api/celeste/modelo").then((r) => { if (!r.ok) throw new Error("modelo"); return r.json(); }),
+        fetch("/api/celeste/modelo?v=2").then((r) => { if (!r.ok) throw new Error("modelo"); return r.json(); }),
         C.stations && C.stations.serie ? C.stations.serie().catch(() => null) : null,
         loadSat("goestemp", 7, 16, goesPost).catch(() => null),
         loadSat("imerg30", 12, 16).catch(() => null),
@@ -546,7 +546,7 @@
         // GOES: imagen de esa hora (pasado) o la última, desplazada con el movimiento de la lluvia (hasta +2 h)
         let goesG = null, goesQ = 0;
         if (goes) {
-          if (L <= 0) { const t = goes.pick(ms); if (t) { goesG = await goes.get(t); goesQ = 1; } }
+          if (L <= 0) { const t = goes.pick(ms) || (L === 0 && ms - goes.last <= 45 * 60000 ? goes.last : null); if (t) { goesG = await goes.get(t); goesQ = 1; } }
           else if (goesLast && L <= 120) { const dx = mvx * (L + goesLastAge), dy = mvy * (L + goesLastAge); goesG = { rain: shift(goesLast.rain, dx, dy), cloud: shift(goesLast.cloud, dx, dy) }; goesQ = clamp(1 - L / 120); }
           if (goesG) used.goes++;
         }
@@ -627,7 +627,7 @@
       let persist = 0;
       if (R >= 7.6 && nb.length) { let sm = R; nb.forEach((x) => (sm += x.rain[k])); persist = sm / (nb.length + 1); }
       let cloud = full.cloud[k];
-      if (P.cloudG) { const g = P.cloudG[k]; if (Number.isFinite(g)) { const q = 0.75 * P.goesQ; cloud = q * g + (1 - q) * cloud; } }
+      if (P.cloudG) { const g = P.cloudG[k]; if (Number.isFinite(g)) { const q = 0.75 * P.goesQ; cloud = q * Math.max(g, cloud) + (1 - q) * cloud; } }
       idx[k] = ladder(R, cloud, full.pp[k], full.cape[k], full.gust[k], persist);
     }
     st.index = idx;
@@ -647,7 +647,7 @@
     const P = st.parts || {};
     const m = (key) => st.coarse[key][ck];
     let cloud = m("cloud");
-    if (P.cloudG && Number.isFinite(P.cloudG[k])) { const q = 0.75 * P.goesQ; cloud = q * P.cloudG[k] + (1 - q) * cloud; }
+    if (P.cloudG && Number.isFinite(P.cloudG[k])) { const q = 0.75 * P.goesQ; cloud = q * Math.max(P.cloudG[k], cloud) + (1 - q) * cloud; }
     return { R: st.rain[k], cloud, pp: m("pp"), cape: m("cape"), gust: m("gust"), heat: m("heat"), v: st.index[k] };
   }
 

@@ -227,7 +227,7 @@
   let cur = 6;
 
   async function buildSerie(data) {
-    const model = await fetch("/api/celeste/modelo").then((r) => r.json());
+    const model = await fetch("/api/celeste/modelo?v=2").then((r) => r.json());
     // Última hora con datos en la mayoría de estaciones
     const counts = new Map();
     data.imn.forEach((s) => s.rows.slice(0, 3).forEach(([t]) => counts.set(t, (counts.get(t) || 0) + 1)));
