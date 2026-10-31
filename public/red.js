@@ -306,6 +306,7 @@
       drawIMN();
       $(".red-sum", extra).innerHTML = imnSummary();
     } catch (e) {
+      console.error("red IMN", e);
       $(".red-sum", extra).innerHTML = `<p class="stamp">No se pudieron cargar las estaciones del IMN.</p>`;
     }
   };
@@ -366,16 +367,20 @@
     const fc = await loadRegions();
     if (regLayer) map.removeLayer(regLayer);
     regLayer = L.geoJSON(fc, { pane: "referencia", interactive: false, style: { fill: false, color: "#40576b", weight: 1.6, opacity: 0.85, dashArray: "6 4" } });
-    // Nombre de cada región en su polígono más grande
-    fc.features.forEach((f) => {
-      let best = null, ba = 0;
-      f.geometry.coordinates.forEach((poly) => { const a = areaKm2(poly[0].map(([x, y]) => [y, x])); if (a > ba) { ba = a; best = poly[0]; } });
-      if (!best) return;
-      const lat = best.reduce((s, p) => s + p[1], 0) / best.length, lon = best.reduce((s, p) => s + p[0], 0) / best.length;
-      L.marker([lat, lon], { pane: "referencia", interactive: false, icon: L.divIcon({ className: "reg-lbl", html: `<span>${esc(f.properties.region)}</span>`, iconSize: null }) }).addTo(regLayer);
+    // Nombre de cada región en su polígono más grande (una región puede venir en varias piezas)
+    const big = new Map();
+    fc.features.forEach((f) => f.geometry.coordinates.forEach((poly) => {
+      const a = areaKm2(poly[0].map(([x, y]) => [y, x]));
+      const r = f.properties.region;
+      if (!big.has(r) || a > big.get(r).a) big.set(r, { a, ring: poly[0] });
+    }));
+    big.forEach(({ ring }, r) => {
+      const lat = ring.reduce((s, p) => s + p[1], 0) / ring.length, lon = ring.reduce((s, p) => s + p[0], 0) / ring.length;
+      L.marker([lat, lon], { pane: "referencia", interactive: false, icon: L.divIcon({ className: "reg-lbl", html: `<span>${esc(r)}</span>`, iconSize: null }) }).addTo(regLayer);
     });
+    fc.nReg = big.size;
     regLayer.addTo(map);
-    $(".reg-stamp", box).textContent = fc.features.length ? `${fc.features.length} regiones climáticas oficiales del IMN (SNIT).` : "El SNIT no respondió.";
+    $(".reg-stamp", box).textContent = fc.features.length ? `${fc.nReg} regiones climáticas oficiales del IMN (SNIT).` : "El SNIT no respondió.";
   };
 
   // ---------- Al tocar el mapa: la estación cuya área contiene el punto ----------
