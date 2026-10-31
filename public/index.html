@@ -103,6 +103,19 @@
     </div>
   </section>
 
+  <!-- Línea de tiempo de las estaciones -->
+  <section id="estTimeline" class="timeline est-timeline" aria-label="Lluvia medida en estaciones, por hora" hidden>
+    <button id="estPlay" class="play" type="button" aria-label="Reproducir la animación de estaciones">
+      <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+      <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+    </button>
+    <div class="tl-main">
+      <div class="tl-head"><span id="estTime" class="tl-time">—</span><span id="estAgo" class="tl-ago"></span></div>
+      <div id="estBars" class="tl-bars" role="slider" tabindex="0" aria-label="Hora de la lluvia en estaciones" aria-valuemin="0" aria-valuemax="12" aria-valuenow="6"></div>
+      <div class="tl-foot"><span id="estStart"></span><span>Medido ← Última hora → Pronóstico</span><span id="estEnd"></span></div>
+    </div>
+  </section>
+
   <!-- Línea de tiempo del índice -->
   <section id="idxTimeline" class="timeline idx-timeline" aria-label="Pronóstico del índice CELESTE" hidden>
     <button id="idxPlay" class="play" type="button" aria-label="Reproducir el pronóstico">

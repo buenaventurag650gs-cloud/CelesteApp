@@ -763,6 +763,7 @@
       <h3>Ahora</h3><div id="ptNow" class="loading-line">Cargando el pronóstico…</div>
       <h3>Próximos 7 días</h3><div id="ptDays"></div>
       <h3>Clima de este punto, 2005–2024</h3><div id="ptClim" class="loading-line">Calculando 20 años de datos…</div>`;
+    wireTips($("#ptBody"));
 
     const la = lat.toFixed(3), lo = lng.toFixed(3);
     const fUrl = `https://api.open-meteo.com/v1/forecast?latitude=${la}&longitude=${lo}&current=temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max&timezone=${encodeURIComponent(TZ)}&forecast_days=7`;
