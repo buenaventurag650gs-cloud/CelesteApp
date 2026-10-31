@@ -106,7 +106,7 @@
     layers.forEach((l) => l.times.forEach((t) => { a = Math.min(a, t - (l.step || l.tol) / 2); b = Math.max(b, t + (l.step || l.tol) / 2); }));
     if (!Number.isFinite(a)) { a = now - 3 * H; b = now; }
     // Ventana común: 6 horas hacia atrás y, si alguna capa pronostica, 6 hacia adelante
-    t0 = now - 6.25 * H;
+    t0 = Math.max(Math.min(a, now - 6 * H), now - 7.25 * H);
     t1 = Math.min(Math.max(b, now + 15 * MIN), now + 6.5 * H);
   }
 
