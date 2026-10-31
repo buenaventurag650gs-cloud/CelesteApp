@@ -39,6 +39,7 @@ export default {
       if (url.pathname === "/api/gibs/paleta") return gibsPalette(url, ctx);
       if (url.pathname === "/api/celeste/modelo") return modelGrid(ctx);
       if (url.pathname === "/api/estaciones/imn") return imnStations(url, ctx);
+      if (url.pathname === "/api/radar/imn") return imnRadar(ctx);
       if (url.pathname === "/api/estaciones/panama") return panamaStations(ctx);
       if (url.pathname === "/api/estaciones/aeropuertos") return airports(ctx);
       if (url.pathname === "/api/salud") return json({ ok: true, hora: new Date().toISOString() });
@@ -358,6 +359,28 @@ async function imnStations(url, ctx) {
     try { const r = await imnTable(t, ctx); const j = await r.clone().json(); out[t] = j.filas; } catch (e) { out[t] = []; }
   }));
   return json({ estaciones: out }, 200, { "Cache-Control": "public, max-age=300" });
+}
+
+// Radar del IMN (Aranjuez, Valle Central): imagen pública; la fecha viene en Last-Modified
+async function imnRadar(ctx) {
+  const cache = caches.default;
+  const key = new Request("https://celeste.cache/radar/imn");
+  const hit = await cache.match(key);
+  if (hit) return hit;
+  const up = await fetch("https://www.imn.ac.cr/imagenes-sat/radar1m10.jpg", { headers: { "User-Agent": "CelesteApp/0.1 (visor climatico)" } });
+  const type = up.headers.get("content-type") || "";
+  if (!up.ok || !type.startsWith("image/")) return json({ error: "El radar del IMN no respondió." }, 502);
+  const res = new Response(up.body, {
+    headers: {
+      "Content-Type": type,
+      "Cache-Control": "public, max-age=120",
+      "X-Fecha-Imagen": up.headers.get("last-modified") || "",
+      "Access-Control-Expose-Headers": "X-Fecha-Imagen",
+      "X-Robots-Tag": "noindex, nofollow",
+    },
+  });
+  ctx.waitUntil(cache.put(key, res.clone()));
+  return res;
 }
 
 // Panamá (IMHPA): lluvia acumulada de 24 horas en estaciones de la región occidental

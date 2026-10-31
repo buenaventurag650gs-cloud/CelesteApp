@@ -52,7 +52,8 @@
   C.stations = { load, accum };
 
   // ---------- Capa ----------
-  map.createPane("estaciones").style.zIndex = 460;
+  map.createPane("estaciones").style.zIndex = 455;
+  map.getPane("estaciones").style.opacity = 0.85;
   map.getPane("estaciones").classList.add("capa-datos");
   // Dibujante propio, creado desde el inicio para que conozca el área visible
   const rend = L.canvas({ pane: "estaciones", padding: 0.3 }).addTo(map);
@@ -74,47 +75,91 @@
   ];
   const wxText = (wx) => (WX.find(([re]) => re.test(wx || "")) || [null, "Sin lluvia"])[1];
 
-  function draw(data) {
-    if (group) map.removeLayer(group);
-    group = L.layerGroup();
-    const p = PALS[hours];
+  // ---------- Superficie interpolada ----------
+  // Las estaciones no se dibujan como puntos: su lluvia se traslada a una superficie continua
+  // (promedio ponderado con núcleo gaussiano de 10 km, hasta 28 km de cada estación),
+  // y se dibuja con los mismos polígonos suavizados y la misma paleta que el radar.
+  const AREA = C.extent(7.9, -86.25, 11.35, -82.45, 320); // ~1,3 km por celda
+  const W = AREA.w, H = AREA.h, N = W * H;
+  const cellLat = new Float32Array(N), cellLng = new Float32Array(N);
+  (function () {
+    const [x0, y0, x1, y1] = AREA.bbox;
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+      const [lat, lng] = C.unmerc(x0 + ((i + 0.5) / W) * (x1 - x0), y1 - ((j + 0.5) / H) * (y1 - y0));
+      cellLat[j * W + i] = lat; cellLng[j * W + i] = lng;
+    }
+  })();
+  const KERNEL_KM = 10, CUTOFF_KM = 28, MIN_W = 0.15;
+  let surf = null; // {grid, ws, points}
+
+  function surface(points) {
+    const acc = new Float32Array(N), ws = new Float32Array(N);
+    const [x0, y0, x1, y1] = AREA.bbox;
+    const cellKm = (x1 - x0) / W / 1000 * Math.cos(9.7 * Math.PI / 180);
+    const rad = Math.ceil(CUTOFF_KM / cellKm);
+    points.forEach((p) => {
+      const [X, Y] = C.merc(p.lat, p.lon);
+      const ci = Math.floor(((X - x0) / (x1 - x0)) * W), cj = Math.floor(((y1 - Y) / (y1 - y0)) * H);
+      const kx = 111.32 * Math.cos(p.lat * Math.PI / 180);
+      for (let j = Math.max(0, cj - rad); j <= Math.min(H - 1, cj + rad); j++) {
+        for (let i = Math.max(0, ci - rad); i <= Math.min(W - 1, ci + rad); i++) {
+          const k = j * W + i;
+          const dx = (cellLng[k] - p.lon) * kx, dy = (cellLat[k] - p.lat) * 110.6;
+          const d2 = dx * dx + dy * dy;
+          if (d2 > CUTOFF_KM * CUTOFF_KM) continue;
+          const w = p.w * Math.exp(-d2 / (2 * KERNEL_KM * KERNEL_KM));
+          acc[k] += w * p.v; ws[k] += w;
+        }
+      }
+    });
+    const raw = new Float32Array(N);
+    for (let k = 0; k < N; k++) raw[k] = ws[k] >= MIN_W ? acc[k] / ws[k] : NaN;
+    return { grid: C.blur(raw, W, H, 1.5), ws, points };
+  }
+
+  function collect(data) {
     const now = Date.now();
+    const pts = [];
     let nImn = 0, nPa = 0;
     data.imn.forEach((s) => {
       const latest = s.rows[0] && s.rows[0][0];
       if (!latest || now - latest > 3 * 3600000) return;
       const v = accum(s, hours, latest);
       if (v == null) return;
+      pts.push({ lat: s.lat, lon: s.lon, v, w: s.q ? 1 : 0.5, n: s.n, src: "IMN", time: latest });
       nImn++;
-      const c = C.bandColor(p, v);
-      L.circleMarker([s.lat, s.lon], {
-        pane: "estaciones", renderer: rend, radius: v >= p.levels[0] ? 5 + Math.min(7, Math.sqrt(v) * 1.4) : 3.5,
-        fillColor: c || "#ffffff", fillOpacity: c ? 0.95 : 0.85, color: c ? "#ffffff" : "#5d7488", weight: c ? 1.2 : 1, dashArray: s.q ? null : "2 2",
-      }).bindTooltip(`<b>${s.n}</b><br>${C.fmtNum1.format(v)} ${p.units}<br><span class="muted">IMN, ${C.fmtHour.format(new Date(latest))}${s.q ? "" : ". Ubicación aproximada"}</span>`, { direction: "top" }).addTo(group);
     });
-    if (hours === 24) {
-      data.pa.forEach((s) => {
-        if (s.mm == null || (s.time && now - s.time > 6 * 3600000)) return;
-        nPa++;
-        const c = C.bandColor(p, s.mm);
-        L.circleMarker([s.lat, s.lon], {
-          pane: "estaciones", renderer: rend, radius: s.mm >= p.levels[0] ? 5 + Math.min(7, Math.sqrt(s.mm) * 1.4) : 3.5,
-          fillColor: c || "#ffffff", fillOpacity: c ? 0.95 : 0.85, color: c ? "#ffffff" : "#5d7488", weight: c ? 1.2 : 1,
-        }).bindTooltip(`<b>${s.n}</b><br>${C.fmtNum1.format(s.mm)} ${p.units}<br><span class="muted">IMHPA Panamá${s.time ? `, ${C.fmtHour.format(new Date(s.time))}` : ""}</span>`, { direction: "top" }).addTo(group);
-      });
-    }
-    data.air.forEach((a) => {
-      const txt = wxText(a.wx);
-      const wet = txt !== "Sin lluvia" && txt !== "Neblina" && txt !== "Bruma";
-      L.marker([a.lat, a.lon], {
-        pane: "estaciones",
-        icon: L.divIcon({ className: "", html: `<div class="apt${wet ? " apt-wet" : ""}">${a.id}</div>`, iconSize: [44, 18], iconAnchor: [22, 9] }),
-        keyboard: false,
-      }).bindTooltip(`<b>${a.nombre}</b><br>${txt}${a.temp != null ? `, ${a.temp} °C` : ""}<br><span class="muted">METAR, ${C.fmtHour.format(new Date(a.hora * 1000))}</span>`, { direction: "top" }).addTo(group);
+    if (hours === 24) data.pa.forEach((s) => {
+      if (s.mm == null || (s.time && now - s.time > 6 * 3600000)) return;
+      pts.push({ lat: s.lat, lon: s.lon, v: s.mm, w: 1, n: s.n, src: "IMHPA", time: s.time });
+      nPa++;
     });
+    return { pts, nImn, nPa };
+  }
+
+  function draw(data) {
+    if (group) map.removeLayer(group);
+    group = L.layerGroup();
+    const p = PALS[hours];
+    const { pts, nImn, nPa } = collect(data);
+    surf = surface(pts);
+    L.geoJSON(C.polygons(surf.grid, W, H, AREA.bbox, p), {
+      pane: "estaciones", renderer: rend, interactive: false, smoothFactor: 0.4,
+      style: (f) => ({ fillColor: f.properties.c, fillOpacity: 1, color: f.properties.c, weight: 0.8, opacity: 1 }),
+    }).addTo(group);
+    // Contorno del área con información (dentro: hay estaciones cerca, aunque no haya llovido)
+    const cov = new Float32Array(N);
+    for (let k = 0; k < N; k++) cov[k] = surf.ws[k] >= MIN_W ? 1 : 0;
+    const covS = C.blur(cov, W, H, 2);
+    L.geoJSON(C.polygons(covS, W, H, AREA.bbox, { levels: [0.5], colors: ["#000"] }), {
+      pane: "estaciones", renderer: rend, interactive: false, smoothFactor: 0.6,
+      style: () => ({ fill: false, color: "#5d7488", weight: 1, opacity: 0.8, dashArray: "4 4" }),
+    }).addTo(group);
     if (active) group.addTo(map);
+    const wet = data.air.filter((a) => !/Sin lluvia|Neblina|Bruma/.test(wxText(a.wx)));
+    const airTxt = data.air.length ? ` Aeropuertos: ${wet.length ? wet.map((a) => `${a.id} ${wxText(a.wx).toLowerCase()}`).join(", ") : "sin lluvia"}.` : "";
     const st = $(".stamp", box);
-    if (st) st.textContent = `${nImn} estaciones del IMN${hours === 24 ? `, ${nPa} de Panamá` : ""} y ${data.air.length} aeropuertos. Datos preliminares en tiempo real.`;
+    if (st) st.textContent = `Superficie de ${nImn} estaciones del IMN${hours === 24 ? ` y ${nPa} de Panamá` : ""}. Datos preliminares en tiempo real.${airTxt}`;
     const lg = $(".est-legend", box);
     if (lg) lg.innerHTML = C.legendHTML(p);
   }
@@ -127,8 +172,26 @@
       </div>
       <div class="est-legend"></div>
       <p class="stamp">Cargando estaciones…</p>
-      <p class="layer-desc">Borde punteado: ubicación aproximada. Panamá solo publica 24 horas. Los aeropuertos indican el estado del tiempo, no milímetros.</p>`;
+      <p class="layer-desc">La línea punteada encierra la zona con estaciones cercanas: dentro de ella, sin color significa que no llovió. Panamá solo publica 24 horas.</p>`;
   }
+
+  // Valor de la superficie al tocar un punto
+  C.pointHooks.push((lat, lng) => {
+    if (!active || !surf || document.body.classList.contains("modo-indice")) return "";
+    const [X, Y] = C.merc(lat, lng);
+    const [x0, y0, x1, y1] = AREA.bbox;
+    const i = Math.floor(((X - x0) / (x1 - x0)) * W), j = Math.floor(((y1 - Y) / (y1 - y0)) * H);
+    if (i < 0 || j < 0 || i >= W || j >= H) return "";
+    const v = surf.grid[j * W + i];
+    const p = PALS[hours];
+    let near = null, nd = Infinity;
+    surf.points.forEach((s) => {
+      const d = Math.hypot((s.lon - lng) * 111.32 * Math.cos(lat * Math.PI / 180), (s.lat - lat) * 110.6);
+      if (d < nd) { nd = d; near = s; }
+    });
+    const txt = Number.isFinite(v) ? (v >= p.levels[0] ? `${C.fmtNum1.format(v)} ${p.units}` : `Sin lluvia (${p.units.replace("mm ", "")})`) : "Sin estaciones cerca";
+    return `<h3>Estaciones de lluvia</h3><div class="values"><div class="value-row"><span class="swatch" style="background:${Number.isFinite(v) ? C.bandColor(p, v) || "transparent" : "transparent"}"></span><span class="value-name">Estimado en este punto</span><b>${txt}</b></div>${near ? `<div class="value-row"><span class="swatch"></span><span class="value-name">Más cercana: ${near.n} (${near.src}), a ${C.fmtNum.format(nd)} km</span><b>${C.fmtNum1.format(near.v)} mm</b></div>` : ""}</div>`;
+  });
 
   C.ext = C.ext || {};
   C.ext.estaciones = async (on, b) => {

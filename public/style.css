@@ -315,3 +315,5 @@ body.point-open .leaflet-top.leaflet-right { right: calc(380px + 24px); }
 .idx-timeline .tl-bar.past:not(.current) { opacity: 0.6; }
 .idx-timeline .tl-bar.now { box-shadow: 0 0 0 1.5px var(--ink); }
 .idx-timeline .tl-bar.current { background: var(--ink) !important; }
+
+.imn-warn { font-size: 12.5px; line-height: 1.4; margin: 6px 0 0; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, #e0a100 16%, var(--card-solid)); border: 1px solid color-mix(in srgb, #e0a100 45%, var(--line)); }

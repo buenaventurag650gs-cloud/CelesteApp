@@ -308,7 +308,8 @@
       layers: [
         { key: "radar", type: "radar", name: "Radar de lluvia", desc: "COCESNA, cada 10 minutos. Cubre el norte y el centro del país.", on: true, opacity: 0.8, pal: "rain" },
         { key: "imerg30", type: "field", id: "IMERG_Precipitation_Rate_30min", name: "Lluvia estimada por satélite", desc: "NASA IMERG, cada 30 minutos con unas horas de retraso. Cubre todo el país.", opacity: 0.75, pal: "rain", srcWidth: 124, sigma: 6 },
-        { key: "estaciones", type: "ext", pane: "estaciones", name: "Estaciones de lluvia", desc: "IMN cada hora, Panamá (IMHPA) y aeropuertos. Lo que de verdad cayó en cada punto.", opacity: 1 },
+        { key: "radarimn", type: "ext", pane: "radarimn", name: "Radar del IMN (Valle Central)", desc: "IMN, Aranjuez. Misma unidad, escala y suavizado que el de COCESNA.", opacity: 0.8 },
+        { key: "estaciones", type: "ext", pane: "estaciones", name: "Lluvia medida en estaciones", desc: "IMN cada hora y Panamá (IMHPA), trasladadas a una superficie continua. Lo que de verdad cayó.", opacity: 0.85 },
         { key: "imergday", type: "field", id: "IMERG_Precipitation_Rate", name: "Lluvia del último día", desc: "NASA IMERG, total del día anterior.", opacity: 0.75, pal: "rainDay", srcWidth: 124, sigma: 6, scale: 24 },
       ],
     },

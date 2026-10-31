@@ -240,7 +240,16 @@
       try { const g = await C.radarRain(p[0]); g.t = p[1]; frames[-m] = g; } catch (e) { /* imagen faltante */ }
     }));
     if (!frames[0]) throw new Error("sin imagen actual");
-    return { time: last[0], frames };
+    // Mosaico con el radar del IMN (solo si su imagen está al día)
+    let mosaic = null;
+    if (C.imnRadar) {
+      try {
+        const imn = await C.imnRadar.load();
+        mosaic = { fresh: imn.fresh, time: imn.time };
+        if (imn.fresh) { const b = C.imnRadar.blend(frames[0].grid); frames[0].grid = b.grid; mosaic.ratio = b.ratio; }
+      } catch (e) { mosaic = null; }
+    }
+    return { time: last[0], frames, mosaic };
   }
 
   // ---------- Calibración con estaciones del IMN (sesgo medio de campo) ----------
@@ -376,9 +385,11 @@
       }
       computedAt = Date.now();
       const motionTxt = motion ? ` La lluvia se desplaza hacia ${direction(motion.meanX, motion.meanY)} a unos ${C.fmtNum.format(speedKmh(motion.meanX, motion.meanY))} km/h.` : "";
+      const mos = radar && radar.mosaic;
+      const mosTxt = mos ? (mos.fresh ? ` Radar del IMN incluido${mos.ratio ? ` (en la zona común marca ${C.fmtNum1.format(mos.ratio)} veces lo de COCESNA)` : ""}.` : " El radar del IMN no publica imágenes recientes; no se incluye.") : "";
       const calibTxt = calib ? (calib.used ? ` Lluvia del radar ajustada con ${calib.n} estaciones del IMN (×${C.fmtNum1.format(calib.factor)}).` : ` Calibración: solo ${calib.n} estaciones con lluvia; se usa el radar sin ajustar.`) : "";
       setStatus(radarOK
-        ? `Radar de las ${C.fmtHour.format(t0)} y modelo de las ${C.fmtHour.format(new Date((model.times.filter((t) => t * 1000 <= Date.now()).pop() || model.times[0]) * 1000))}${motionTxt}${calibTxt}`
+        ? `Radar de las ${C.fmtHour.format(t0)} y modelo de las ${C.fmtHour.format(new Date((model.times.filter((t) => t * 1000 <= Date.now()).pop() || model.times[0]) * 1000))}${motionTxt}${calibTxt}${mosTxt}`
         : "Sin radar en este momento: el índice usa solo el modelo numérico.");
       $("#idxTimeline").hidden = !active;
     } catch (err) {
