@@ -45,6 +45,7 @@ export default {
       if (url.pathname === "/api/estaciones/panama") return panamaStations(ctx);
       if (url.pathname === "/api/estaciones/panama/serie") return panamaSeries(url, ctx);
       if (url.pathname === "/api/estaciones/aeropuertos") return airports(ctx);
+      if (url.pathname === "/api/lugar") return placeName(url, ctx);
       if (url.pathname === "/api/salud") return json({ ok: true, hora: new Date().toISOString() });
     } catch (err) {
       return json({ error: "El servicio de radar no respondió.", detalle: String(err) }, 502);
@@ -292,12 +293,12 @@ function parseNum(s) {
 // Rejilla de 0,3° sobre Costa Rica (≈ resolución de los modelos globales).
 // Se consulta una vez por hora y se guarda para todos los visitantes.
 const MODEL_GRID = { lat0: 7.8, lat1: 11.4, lon0: -86.4, lon1: -82.2, step: 0.3 };
-const MODEL_VARS = ["precipitation", "precipitation_probability", "cape", "wind_gusts_10m", "apparent_temperature"];
+const MODEL_VARS = ["precipitation", "precipitation_probability", "cape", "wind_gusts_10m", "apparent_temperature", "cloud_cover"];
 
 async function modelGrid(ctx) {
   const hourKey = new Date().toISOString().slice(0, 13);
   const cache = caches.default;
-  const key = new Request(`https://celeste.cache/modelo/${hourKey}`);
+  const key = new Request(`https://celeste.cache/modelo2/${hourKey}`);
   const hit = await cache.match(key);
   if (hit) return hit;
 
@@ -525,6 +526,28 @@ async function panamaSeries(url, ctx) {
     } catch (e) { out[id] = { filas: [] }; }
   }));
   return json({ estaciones: out }, 200, { "Cache-Control": "public, max-age=300" });
+}
+
+// Nombre del lugar (OpenStreetMap Nominatim, geocodificación inversa). Se guarda 30 días por punto
+// redondeado a ~100 m para no repetir consultas (política de uso: pocas consultas y con identificación).
+async function placeName(url, ctx) {
+  const lat = Number(url.searchParams.get("lat")), lon = Number(url.searchParams.get("lon"));
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return json({ error: "Coordenadas inválidas." }, 400);
+  const la = lat.toFixed(3), lo = lon.toFixed(3);
+  return cachedJSON(`https://celeste.cache/lugar/${la},${lo}`, 2592000, ctx, async () => {
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${la}&lon=${lo}&zoom=16&addressdetails=1&accept-language=es`, {
+      headers: { "User-Agent": "CelesteApp/0.2 (+https://celesteapp.buenaventurag650gs.workers.dev)", Referer: "https://celesteapp.buenaventurag650gs.workers.dev/" },
+    });
+    if (!r.ok) return { nombre: null };
+    const j = await r.json();
+    const a = j.address || {};
+    const local = a.neighbourhood || a.suburb || a.hamlet || a.village || a.quarter || a.town || a.city_district || a.city || null;
+    const canton = a.county || a.city || a.town || null;
+    const prov = a.state || null;
+    const parts = [local, canton !== local ? canton : null, prov].filter(Boolean);
+    const agua = !parts.length && /ocean|sea|bay|water/i.test(j.category || j.type || "");
+    return { nombre: parts[0] || (agua ? "En el mar" : null), detalle: parts.slice(1).join(", "), pais: a.country || null };
+  });
 }
 
 // Aeropuertos (METAR): estado del tiempo cada hora
