@@ -102,6 +102,7 @@
     let best = null, bd = Infinity;
     for (const f of regions.features) {
       for (const poly of f.geometry.coordinates) {
+        if (!poly[0]) continue;
         if (inRing(lon, lat, poly[0]) && !poly.slice(1).some((h) => inRing(lon, lat, h))) return f.properties.region;
         // Estaciones sobre la costa: la región más cercana
         for (const [x, y] of poly[0]) { const d = (x - lon) ** 2 + (y - lat) ** 2; if (d < bd) { bd = d; best = f.properties.region; } }
@@ -370,6 +371,7 @@
     // Nombre de cada región en su polígono más grande (una región puede venir en varias piezas)
     const big = new Map();
     fc.features.forEach((f) => f.geometry.coordinates.forEach((poly) => {
+      if (!poly[0]) return;
       const a = areaKm2(poly[0].map(([x, y]) => [y, x]));
       const r = f.properties.region;
       if (!big.has(r) || a > big.get(r).a) big.set(r, { a, ring: poly[0] });
