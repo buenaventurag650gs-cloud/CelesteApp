@@ -213,7 +213,11 @@
   }
 
   // ---------- Cálculo ----------
-  const pause = () => new Promise((r) => setTimeout(r, 0));
+  // Cede el control al navegador entre pasos sin depender de setTimeout (que se frena en segundo plano)
+  const chan = new MessageChannel();
+  const waiting = [];
+  chan.port1.onmessage = () => { const r = waiting.shift(); if (r) r(); };
+  const pause = () => new Promise((r) => { waiting.push(r); chan.port2.postMessage(0); });
 
   async function run() {
     if (computing) return;
