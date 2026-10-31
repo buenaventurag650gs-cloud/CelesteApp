@@ -105,8 +105,9 @@
     let a = Infinity, b = -Infinity;
     layers.forEach((l) => l.times.forEach((t) => { a = Math.min(a, t - (l.step || l.tol) / 2); b = Math.max(b, t + (l.step || l.tol) / 2); }));
     if (!Number.isFinite(a)) { a = now - 3 * H; b = now; }
-    t0 = Math.max(a, now - 12.5 * H);
-    t1 = Math.min(Math.max(b, now + 10 * MIN), now + 6.6 * H);
+    // Ventana común: 6 horas hacia atrás y, si alguna capa pronostica, 6 hacia adelante
+    t0 = now - 6.25 * H;
+    t1 = Math.min(Math.max(b, now + 15 * MIN), now + 6.5 * H);
   }
 
   const pct = (t) => ((t - t0) / (t1 - t0)) * 100;
@@ -183,6 +184,7 @@
         try { l.show(n.t, off); } catch (e) { /* una capa con error no detiene a las demás */ }
       }
     });
+    if (window.Celeste && window.Celeste.refreshPoint) window.Celeste.refreshPoint();
   }
 
   function play() {

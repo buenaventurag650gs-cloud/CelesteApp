@@ -524,3 +524,48 @@ body.tl-apiladas #timeline { bottom: 116px; }
 .idx-timeline .tl-head { flex-wrap: wrap; row-gap: 0; }
 .idx-timeline .tl-time, .tl-foot span { white-space: nowrap; }
 @media (max-width: 820px) { .idx-timeline .tl-time { font-size: 15px; } .idx-timeline .tl-ago { font-size: 12px; } .tl-foot span:nth-child(2) { white-space: normal; } }
+
+/* ---------- Controles más compactos e info técnica ---------- */
+.layer-row { padding: 7px 10px; gap: 8px; align-items: center; }
+.layer-row input { width: 28px; height: 16px; margin-top: 0; }
+.layer-row input::after { top: 2px; left: 2px; width: 12px; height: 12px; }
+.layer-row input:checked::after { transform: translateX(12px); }
+.layer-ico { width: 24px; height: 24px; border-radius: 7px; }
+.layer-ico .ico { width: 15px; height: 15px; }
+.layer.sub .layer-ico { width: 22px; height: 22px; }
+.layer-name { font-size: 13.5px; }
+.layer.sub .layer-name { font-size: 13px; }
+.layer-txt { flex: 1; }
+.tag { font-size: 10px; padding: 0 5px; }
+.src { font-size: 10px; padding: 1px 5px; }
+.info-btn { flex: none; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line); background: var(--card-solid); color: var(--muted); font: italic 700 12px/1 Georgia, serif; cursor: pointer; display: grid; place-items: center; padding: 0; }
+.info-btn:hover, .info-btn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.info-dot { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; border: 1px solid var(--line); font: italic 700 10px/1 Georgia, serif; vertical-align: 1px; }
+.layer-info { margin: 0 10px 8px 46px; padding: 8px 10px; border-radius: 9px; background: var(--accent-soft); font-size: 12px; line-height: 1.4; }
+.layer-info p { margin: 0; }
+.layer-info .tech { margin-top: 5px; color: var(--muted); }
+.layer-extra { padding: 0 10px 10px 46px; }
+.layer-extra p.layer-desc { display: none; }
+.children { margin-left: 18px; }
+.family + .family { margin-top: 6px; }
+.seg button { padding: 5px 4px; font-size: 12.5px; }
+.red-seg button, .est-seg button { font-size: 11.5px; padding: 4px 2px; }
+.product button { padding: 5px 8px !important; font-size: 12px !important; }
+.layer-extra .opacity { font-size: 12px; }
+.hint { font-size: 12.5px; }
+.group h2 { font-size: 12.5px; }
+.idx-cta { padding-top: 10px !important; padding-bottom: 10px !important; }
+@media (max-width: 820px) { .pill { padding: 6px 10px; font-size: 13px; } .play { width: 40px; height: 40px; } }
+
+/* Metodología */
+.metodo-box summary { font-weight: 700; }
+ol.metodo { padding-left: 18px; margin: 8px 0 0; font-size: 12.5px; line-height: 1.45; }
+ol.metodo li { margin-bottom: 8px; }
+.formula { display: inline-block; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; background: var(--accent-soft); padding: 1px 5px; border-radius: 5px; }
+.mtab { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 11.5px; }
+.mtab th { text-align: left; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--line); padding: 3px 4px; }
+.mtab td { border-bottom: 1px solid var(--line); padding: 4px; vertical-align: top; }
+.mtab td small { display: block; color: var(--muted); font-size: 10.5px; }
+.mtab.rules td:first-child { width: 30px; }
+.mtab .lvl-badge.sm { width: 24px; height: 24px; }
+.mtab .lvl-badge .lvl-svg { width: 16px; height: 16px; }

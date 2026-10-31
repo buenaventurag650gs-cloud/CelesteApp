@@ -51,16 +51,12 @@
           <summary>Ajustar el peso de cada fuente de lluvia</summary>
           <div id="idxWeights"></div>
         </details>
-        <details class="about">
-          <summary>Cómo se calcula</summary>
-          <p><b>Lluvia.</b> En cada punto y cada media hora se promedian las fuentes que tienen dato ahí: el radar de COCESNA (ajustado con la lluvia medida en las estaciones), la superficie de lluvia de las estaciones del IMN y de Panamá, la lluvia estimada por los topes fríos de las nubes de GOES-Este (también ajustada con estaciones), IMERG de la NASA cuando hay imagen de esa hora (llega con unas 5 horas de retraso) y el modelo numérico. Cada fuente pesa según el peso que elijas abajo y su calidad en ese lugar: el alcance del radar, la cercanía de estaciones y el plazo del pronóstico.</p>
-          <p><b>Próximas horas.</b> Se mide hacia dónde y a qué velocidad se mueve la lluvia en el radar y se proyecta hasta 3 horas; la lluvia de GOES se desplaza igual hasta 2 horas. Las estaciones aportan su pronóstico corregido, que pierde peso con el plazo. Desde las 3 horas domina el modelo numérico (Open-Meteo, rejilla de 0,3°).</p>
-          <p><b>Peldaños.</b> Cada peldaño tiene una regla objetiva. Sin lluvia, manda la nubosidad (satélite GOES-Este en lo observado y modelo en el pronóstico): Pura vida (&lt; 20 %), Despejadillo (20–45 %), Nubladillo (45–80 %) y Amenazando (más de 80 %, o nublado con probabilidad de lluvia de 50 % o más o potencial de tormenta alto). Con lluvia, manda la intensidad: Llovizna (0,2–2,5 mm/h), Aguacero (2,5–7,6), Chaparrón (más de 7,6), Temporal (más de 7,6 sostenida: promedio de 10 mm/h o más durante ±1 hora), Baldazo (40 mm/h o más) y Vendaval (ráfagas de 70 km/h con lluvia, o de 90 km/h). El número de 0 a 100 ubica el punto dentro de su peldaño.</p>
-          <p><b>Probabilidad de lluvia en la ficha.</b> Combina qué parte de los 10 km alrededor del punto recibe lluvia en ese lapso según el mapa combinado (60 %) con la probabilidad del modelo (40 %).</p>
-          <p>Es una estimación automática y experimental. Para avisos oficiales consulta al IMN y a la CNE.</p>
+        <details class="about metodo-box">
+          <summary>Metodología</summary>
+          <div id="idxMetodo"></div>
         </details>
       </section>
-      <p class="hint">Cada fuente oficial muestra su dato crudo; debajo, con sangría, los mapas que Celeste deriva de ella. Las capas con reloj se animan con la línea de tiempo de abajo. Toca cualquier punto del mapa para ver sus valores.</p>
+      <p class="hint">Fuentes oficiales y, con sangría, sus mapas derivados. Toca <span class="info-dot">i</span> para la explicación técnica de cada capa.</p>
       <div id="layerGroups"></div>
 
       <section class="group">

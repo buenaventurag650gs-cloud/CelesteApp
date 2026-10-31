@@ -87,7 +87,7 @@
   const RSRC = [
     { key: "radar", name: "Radar COCESNA", w: 50, src: "cocesna" },
     { key: "est", name: "Lluvia de estaciones ±6 h", w: 30, src: "imn" },
-    { key: "goes", name: "GOES-Este, nubes frías", w: 12, src: "noaa" },
+    { key: "goes", name: "Lluvia estimada por nubes frías (GOES-Este)", w: 12, src: "noaa" },
     { key: "imerg", name: "IMERG (satélite)", w: 10, src: "nasa" },
     { key: "model", name: "Modelo numérico", w: 6, src: null },
   ];
@@ -746,6 +746,8 @@
     bars.setAttribute("aria-valuenow", String(cur));
     bars.setAttribute("aria-valuetext", whenText(st));
     updateClouds(st);
+    // La ficha abierta y la tarjeta de ubicación siguen la hora elegida
+    if (active) { C.refreshPoint && C.refreshPoint(); renderLoc(); }
   }
 
   function play() {
@@ -869,7 +871,7 @@
     resourceTimer = setTimeout(() => {
       steps.forEach((s) => s && combineRain(s));
       steps.forEach((s) => s && computeIndex(s));
-      drawBars(); show(cur); renderLoc();
+      drawBars(); show(cur); renderLoc(); renderMethod();
       store.set("celeste-fuentes", JSON.stringify(RW()));
     }, 300);
   });
@@ -946,9 +948,11 @@
     const place = userPlace && userPlace.nombre ? userPlace.nombre : "Tu ubicación";
     let body = `<p class="w-note">Calculando…</p>`;
     if (c && steps[NOW_I]) {
-      const l = levelOf(steps[NOW_I].index[c.k]);
+      const sel = steps[cur] || steps[NOW_I];
+      const l = levelOf(sel.index[c.k]);
       const o = outlook(c, NOW_I + 1, NOW_I + 12);
-      body = `<div class="loc-now">${levelBadge(l, "big")}<div><span class="loc-name">${place}</span><b>Ahora: ${LEVELS[l].n}</b><span class="muted">${LEVELS[l].d}</span></div></div>
+      const lbl = sel.min === 0 ? "Ahora" : sel.min < 0 ? `Hace ${leadWords(sel.min)} (${C.fmtHour.format(sel.time)})` : `Dentro de ${leadWords(sel.min)} (${C.fmtHour.format(sel.time)})`;
+      body = `<div class="loc-now">${levelBadge(l, "big")}<div><span class="loc-name">${place}</span><b>${lbl}: ${LEVELS[l].n}</b><span class="muted">${LEVELS[l].d}</span></div></div>
         ${o ? `<p class="loc-next">Próximas 6 h: hasta <b>${LEVELS[o.maxL].n}</b>${o.maxL > l ? ` hacia las ${C.fmtHour.format(o.at.time)}` : ""} · lluvia ${o.pp} % · ${C.fmtNum1.format(o.mm)} mm esperados.</p>` : ""}`;
     } else if (!c) body = `<p class="w-note">${place} está fuera del área del índice (Costa Rica).</p>`;
     el.innerHTML = `<div class="loc-card${alertMsg ? " alerta" : ""}">${body}
@@ -1003,7 +1007,37 @@
     if (active || ALERT.on) refresh = setInterval(() => { if (active || ALERT.on) run(); }, 10 * 60000);
   }
 
+  function renderMethod() {
+    const el = $("#idxMetodo");
+    if (!el) return;
+    const tot = RSRC.reduce((a, r) => a + r.w, 0) || 1;
+    const SRC = [
+      ["radar", "Radar de COCESNA", "10 min", "~10 min", "~1 km", "Alcance del radar (430 km) y, en el pronóstico, baja hasta 0 a las 3 h"],
+      ["est", "Estaciones IMN + IMHPA (superficie ±6 h)", "1 h", "~1 h", "puntual → 10 km", "Cercanía de estaciones; en el pronóstico baja con el plazo (0 a las 8 h)"],
+      ["goes", "Lluvia por nubes frías (GOES-Este)", "10 min", "~20 min", "~2 km", "Completa en lo observado; desplazada con el movimiento de la lluvia hasta +2 h"],
+      ["imerg", "IMERG (NASA)", "30 min", "~5 h", "~10 km", "Solo en los pasos con imagen (las primeras horas del pasado)"],
+      ["model", "Modelo numérico (Open-Meteo)", "1 h", "—", "~30 km", "Siempre presente: respaldo donde faltan las demás"],
+    ];
+    el.innerHTML = `
+      <ol class="metodo">
+        <li><b>Rejilla y tiempo.</b> Costa Rica en celdas de ~1,2 km, cada 30 min desde hace 6 h hasta dentro de 6 h. Fuera del país (más una franja costera de ~10 km) no se dibuja.</li>
+        <li><b>Lluvia combinada.</b> En cada celda: <span class="formula">R = Σ (peso × calidad × lluvia de la fuente) ÷ Σ (peso × calidad)</span>. El peso lo eliges abajo; la calidad depende de dónde y cuándo:
+          <table class="mtab"><thead><tr><th>Fuente</th><th>Cada</th><th>Retraso</th><th>Detalle</th><th>Peso</th></tr></thead><tbody>
+          ${SRC.map(([k, n, f, r, d, q]) => `<tr title="${q}"><td>${n}<small>${q}</small></td><td>${f}</td><td>${r}</td><td>${d}</td><td>${C.fmtNum.format((RSRC.find((x) => x.key === k).w / tot) * 100)} %</td></tr>`).join("")}
+          </tbody></table></li>
+        <li><b>Calibración con estaciones.</b> La lluvia del radar y la de GOES se comparan con lo que midieron las estaciones en las últimas 3 horas y se corrige su intensidad con un factor único (sesgo medio de campo; radar entre ×0,33 y ×3, GOES entre ×0,15 y ×2,5).</li>
+        <li><b>Pronóstico.</b> Se mide el movimiento de la lluvia comparando las últimas imágenes del radar (correlación por bloques) y se proyecta hasta 3 h con advección semilagrangiana, debilitándola y difuminándola con el plazo. GOES se desplaza igual hasta 2 h. Las estaciones aportan el modelo corregido con su sesgo local. Más allá, domina el modelo.</li>
+        <li><b>Nubosidad.</b> En lo observado, de la temperatura de los topes de GOES (topes fríos = nublado), combinada con la del modelo, que ve mejor las nubes bajas. En el pronóstico, del modelo.</li>
+        <li><b>Peldaño.</b> Con la lluvia, la nubosidad, la probabilidad de lluvia, el potencial de tormenta (CAPE) y las ráfagas se aplica la regla de cada peldaño (abajo). El número de 0 a 100 ubica el punto dentro de su peldaño (10 puntos por peldaño).
+          <table class="mtab rules"><tbody>${LEVELS.map((L, l) => `<tr><td>${levelBadge(l, "sm")}</td><td><b>${L.n}</b></td><td>${L.rule}</td></tr>`).join("")}</tbody></table></li>
+        <li><b>Probabilidad de lluvia en la ficha.</b> 60 % "de vecindario" (qué parte de los 10 km alrededor recibe al menos 0,2 mm/h en el lapso, según la lluvia combinada) + 40 % probabilidad del modelo.</li>
+        <li><b>Confianza.</b> Alta con radar y estaciones cerca; media con solo uno de los dos; baja con solo satélite y modelo.</li>
+        <li><b>Límites.</b> Datos preliminares sin control de calidad; el radar del IMN no se actualiza desde septiembre de 2025; IMERG llega tarde; GOES confunde yunques de cirros con lluvia. Es un producto experimental: para avisos oficiales consulta al IMN y a la CNE.</li>
+      </ol>`;
+  }
+
   renderLegend();
+  renderMethod();
   renderViz();
   renderWeights();
   renderLoc();

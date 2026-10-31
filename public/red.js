@@ -493,15 +493,25 @@
     let h = "";
     const a = imn.on && near(imn.sites);
     if (a) {
-      const s = a.s;
-      h += `<h3>Estación del IMN más cercana</h3><div class="values">
-        <div class="value-row"><span class="swatch" style="background:${colorOf(s, imn.mode) || "transparent"}"></span><span class="value-name">${esc(s.n)} (${esc(s.region || "")}), a ${C.fmtNum.format(a.d)} km</span><b>${STATUS[s.status]}</b></div>
-        ${s.rain1 != null ? `<div class="value-row"><span class="swatch"></span><span class="value-name">Lluvia última hora / 24 h</span><b>${C.fmtNum1.format(s.rain1)} / ${s.rain24 != null ? C.fmtNum1.format(s.rain24) : "–"} mm</b></div>` : ""}
-        ${s.temp != null ? `<div class="value-row"><span class="swatch"></span><span class="value-name">Temperatura</span><b>${C.fmtNum1.format(s.temp)} °C</b></div>` : ""}
+      const s = a.s, t = imn.t;
+      const r1 = at(s, "rain1", t), r24 = at(s, "rain24", t), tp = at(s, "temp", t);
+      const when = t == null ? "última hora" : `hora que termina a las ${C.fmtHour.format(new Date(t))}`;
+      h += `<h3>Estación del IMN más cercana${t == null ? "" : ` · ${C.fmtHour.format(new Date(t))}`}</h3><div class="values">
+        <div class="value-row"><span class="swatch" style="background:${colorOf(s, imn.mode) || "transparent"}"></span><span class="value-name">${esc(s.n)} (${esc(s.region || "")}), a ${C.fmtNum.format(a.d)} km</span><b>${t == null ? STATUS[s.status] : r1 != null ? "Con dato" : "Sin dato a esa hora"}</b></div>
+        ${r1 != null ? `<div class="value-row"><span class="swatch"></span><span class="value-name">Lluvia (${when}) / 24 h</span><b>${C.fmtNum1.format(r1)} / ${r24 != null ? C.fmtNum1.format(r24) : "–"} mm</b></div>` : ""}
+        ${tp != null ? `<div class="value-row"><span class="swatch"></span><span class="value-name">Temperatura</span><b>${C.fmtNum1.format(tp)} °C</b></div>` : ""}
       </div>`;
     }
     const b = pa.on && near(pa.sites);
-    if (b) h += `<h3>Estación de Panamá más cercana</h3><div class="values"><div class="value-row"><span class="swatch"></span><span class="value-name">${esc(b.s.n)}, a ${C.fmtNum.format(b.d)} km</span><b>${b.s.mm != null ? `${C.fmtNum1.format(b.s.mm)} mm en 24 h` : "Sin dato"}</b></div></div>`;
+    if (b) {
+      const s = b.s, t = pa.t;
+      const r1 = s.rows.length ? (t == null ? s.rows[0][1] : (near10(s.rows, t) || [])[1]) : null;
+      const r24 = t == null ? (s.rows.length ? C.stations.accum(s, 24, s.rows[0][0]) : s.mm) : paValue(s);
+      h += `<h3>Estación de Panamá más cercana${t == null ? "" : ` · ${C.fmtHour.format(new Date(t))}`}</h3><div class="values">
+        <div class="value-row"><span class="swatch"></span><span class="value-name">${esc(s.n.replace(/\s*\([\d-]+\)$/, ""))}, a ${C.fmtNum.format(b.d)} km</span><b>${r24 != null ? `${C.fmtNum1.format(r24)} mm en 24 h` : "Sin dato"}</b></div>
+        ${r1 != null ? `<div class="value-row"><span class="swatch"></span><span class="value-name">Lluvia en la hora</span><b>${C.fmtNum1.format(r1)} mm</b></div>` : ""}
+      </div>`;
+    }
     return h;
   });
 
