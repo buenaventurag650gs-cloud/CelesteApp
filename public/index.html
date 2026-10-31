@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Celeste — Clima de Costa Rica</title>
+  <meta name="description" content="Visor climático de Costa Rica: radar de lluvia, satélite, pronóstico y clima histórico de cualquier punto.">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="map" aria-label="Mapa de Costa Rica"></div>
+
+  <!-- Panel de capas -->
+  <aside id="panel" class="panel" aria-label="Capas del mapa">
+    <header class="brand">
+      <div>
+        <h1 class="wordmark">Celeste</h1>
+        <p class="tagline">El cielo de Costa Rica, en vivo</p>
+      </div>
+      <div class="brand-actions">
+        <button id="btnTheme" class="icon-btn" type="button" aria-label="Cambiar entre tema claro y oscuro" title="Tema claro u oscuro">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+        </button>
+        <button id="btnClosePanel" class="icon-btn only-mobile" type="button" aria-label="Cerrar capas">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="panel-body">
+      <p class="hint">Activa capas y toca cualquier punto del mapa para ver su pronóstico y su clima histórico.</p>
+      <div id="layerGroups"></div>
+
+      <section class="group">
+        <h2>Mapa de fondo</h2>
+        <div class="seg" role="radiogroup" aria-label="Mapa de fondo" id="baseSeg">
+          <button type="button" role="radio" data-base="calles" aria-checked="true">Calles</button>
+          <button type="button" role="radio" data-base="relieve" aria-checked="false">Relieve</button>
+          <button type="button" role="radio" data-base="satelite" aria-checked="false">Satélite</button>
+        </div>
+      </section>
+
+      <details class="about">
+        <summary>Fuentes y avisos</summary>
+        <p>Radar: COCESNA (prototipo, uso en gestión). Satélite, lluvia estimada, mar, suelo, vegetación e incendios: NASA GIBS (GOES-Este, GPM IMERG, GHRSST, MODIS, VIIRS). Pronóstico y clima histórico: Open-Meteo con datos de ERA5 (Copernicus), CC BY 4.0. Mapas de fondo: CARTO, OpenStreetMap y Esri.</p>
+        <p>Celeste es un prototipo informativo. Para avisos oficiales consulta al IMN y a la CNE.</p>
+      </details>
+    </div>
+  </aside>
+
+  <!-- Barra superior móvil -->
+  <div class="mobilebar only-mobile">
+    <span class="wordmark small">Celeste</span>
+    <button id="btnOpenPanel" class="pill" type="button" aria-controls="panel" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5"/></svg>
+      Capas
+    </button>
+  </div>
+
+  <!-- Línea de tiempo del radar -->
+  <section id="timeline" class="timeline" aria-label="Animación del radar" hidden>
+    <button id="btnPlay" class="play" type="button" aria-label="Reproducir animación del radar">
+      <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+      <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+    </button>
+    <div class="tl-main">
+      <div class="tl-head">
+        <span id="tlTime" class="tl-time">—</span>
+        <span id="tlAgo" class="tl-ago"></span>
+      </div>
+      <div id="tlBars" class="tl-bars" role="slider" tabindex="0" aria-label="Hora de la imagen de radar" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"></div>
+      <div class="tl-foot"><span id="tlStart"></span><span>Área con lluvia en el radar</span><span id="tlEnd"></span></div>
+    </div>
+  </section>
+
+  <!-- Panel del punto -->
+  <aside id="point" class="point" aria-label="Información del punto" hidden>
+    <header class="point-head">
+      <div>
+        <h2 id="ptTitle">Este punto</h2>
+        <p id="ptMeta" class="muted"></p>
+      </div>
+      <button id="btnClosePoint" class="icon-btn" type="button" aria-label="Cerrar información del punto">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <div id="ptBody" class="point-body"></div>
+  </aside>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
