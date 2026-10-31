@@ -37,6 +37,7 @@ export default {
       if (url.pathname === "/api/radar/datos") return radarData(url, ctx);
       if (url.pathname === "/api/gibs/mapa") return gibsMap(url, ctx);
       if (url.pathname === "/api/gibs/paleta") return gibsPalette(url, ctx);
+      if (url.pathname === "/api/celeste/modelo") return modelGrid(ctx);
       if (url.pathname === "/api/salud") return json({ ok: true, hora: new Date().toISOString() });
     } catch (err) {
       return json({ error: "El servicio de radar no respondió.", detalle: String(err) }, 502);
@@ -245,6 +246,66 @@ function parseNum(s) {
   if (/^-?inf$/i.test(s) || s === "+INF") return s.startsWith("-") ? -1e30 : 1e30;
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
+}
+
+// ---------- Modelo numérico para el índice CELESTE ----------
+// Rejilla de 0,3° sobre Costa Rica (≈ resolución de los modelos globales).
+// Se consulta una vez por hora y se guarda para todos los visitantes.
+const MODEL_GRID = { lat0: 7.8, lat1: 11.4, lon0: -86.4, lon1: -82.2, step: 0.3 };
+const MODEL_VARS = ["precipitation", "precipitation_probability", "cape", "wind_gusts_10m", "apparent_temperature"];
+
+async function modelGrid(ctx) {
+  const hourKey = new Date().toISOString().slice(0, 13);
+  const cache = caches.default;
+  const key = new Request(`https://celeste.cache/modelo/${hourKey}`);
+  const hit = await cache.match(key);
+  if (hit) return hit;
+
+  const g = MODEL_GRID;
+  const lats = [], lons = [];
+  for (let la = g.lat0; la <= g.lat1 + 1e-9; la += g.step) lats.push(+la.toFixed(3));
+  for (let lo = g.lon0; lo <= g.lon1 + 1e-9; lo += g.step) lons.push(+lo.toFixed(3));
+  const pts = [];
+  lats.forEach((la) => lons.forEach((lo) => pts.push([la, lo])));
+
+  const chunks = [];
+  for (let i = 0; i < pts.length; i += 100) chunks.push(pts.slice(i, i + 100));
+  const results = await Promise.all(chunks.map(async (c) => {
+    const q = new URLSearchParams({
+      latitude: c.map((p) => p[0]).join(","),
+      longitude: c.map((p) => p[1]).join(","),
+      hourly: MODEL_VARS.join(","),
+      past_hours: "1",
+      forecast_hours: "8",
+      timezone: "GMT",
+      timeformat: "unixtime",
+    });
+    const r = await fetch(`https://api.open-meteo.com/v1/forecast?${q}`);
+    if (!r.ok) throw new Error(`modelo ${r.status}`);
+    const j = await r.json();
+    return Array.isArray(j) ? j : [j];
+  }));
+  const all = results.flat();
+  if (all.length !== pts.length) return json({ error: "Respuesta incompleta del modelo." }, 502);
+
+  const times = all[0].hourly.time;
+  const nt = times.length, ny = lats.length, nx = lons.length;
+  const v = {};
+  MODEL_VARS.forEach((name) => {
+    const arr = new Array(nt * ny * nx);
+    all.forEach((p, idx) => {
+      const j = Math.floor(idx / nx), i = idx % nx;
+      const series = p.hourly[name] || [];
+      for (let k = 0; k < nt; k++) {
+        const val = series[k];
+        arr[(k * ny + j) * nx + i] = val == null ? null : Math.round(val * 10) / 10;
+      }
+    });
+    v[name] = arr;
+  });
+  const res = json({ lats, lons, times, vars: v, generado: new Date().toISOString() }, 200, { "Cache-Control": "public, max-age=1800" });
+  ctx.waitUntil(cache.put(key, res.clone()));
+  return res;
 }
 
 // ---------- Acceso ----------

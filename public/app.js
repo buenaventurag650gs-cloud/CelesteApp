@@ -254,6 +254,7 @@
   L.control.zoom({ position: "topright", zoomInTitle: "Acercar", zoomOutTitle: "Alejar" }).addTo(map);
   map.attributionControl.setPrefix(false);
   map.createPane("clima").style.zIndex = 405;
+  map.getPane("clima").classList.add("capa-datos");
   map.createPane("etiquetas").style.zIndex = 640;
   map.getPane("etiquetas").style.pointerEvents = "none";
 
@@ -338,6 +339,7 @@
       def.pane = `campo-${def.key}`;
       map.createPane(def.pane).style.zIndex = def.type === "radar" ? 430 : zBase++;
       map.getPane(def.pane).style.opacity = def.opacity;
+      map.getPane(def.pane).classList.add("capa-datos");
       def.renderer = L.canvas({ pane: def.pane, padding: 0.4 });
     }
   });
@@ -673,6 +675,19 @@
     };
   })();
 
+  // Radar como rejilla de lluvia (mm/h), para el índice CELESTE
+  const RADAR_AREA = extent(7.55, -86.5, 11.75, -82.25, 480);
+  async function radarRain(time, product = "LNB_CAPPI_Z_450Km_1Km_cappi_dBZ") {
+    const q = new URLSearchParams({ capa: product, hora: time, bbox: RADAR_AREA.bbox.map((n) => n.toFixed(1)).join(","), ancho: RADAR_AREA.w, alto: RADAR_AREA.h });
+    const img = await readPixels(`/api/radar/datos?${q}`);
+    const grid = new Float32Array(img.w * img.h);
+    for (let i = 0, j = 0; i < grid.length; i++, j += 4) {
+      const dbz = ((img.px[j] - 1) * 85) / 254;
+      grid[i] = img.px[j + 3] > 128 && dbz >= 7 ? Math.pow(Math.pow(10, dbz / 10) / 200, 0.625) : 0;
+    }
+    return { grid, w: img.w, h: img.h, bbox: RADAR_AREA.bbox };
+  }
+
   // ---------- Panel del punto ----------
   const WMO = {
     0: "Despejado", 1: "Mayormente despejado", 2: "Parcialmente nublado", 3: "Nublado",
@@ -740,7 +755,8 @@
     $("#ptTitle").textContent = coordText(lat, lng);
     $("#ptMeta").textContent = "Consultando…";
     $("#ptBody").innerHTML = `
-      ${layerValuesHTML(lat, lng)}
+      ${(window.Celeste.pointHooks || []).map((h) => h(lat, lng)).join("")}
+      ${document.body.classList.contains("modo-indice") ? "" : layerValuesHTML(lat, lng)}
       <h3>Ahora</h3><div id="ptNow" class="loading-line">Cargando el pronóstico…</div>
       <h3>Próximos 7 días</h3><div id="ptDays"></div>
       <h3>Clima de este punto, 2005–2024</h3><div id="ptClim" class="loading-line">Calculando 20 años de datos…</div>`;
@@ -912,6 +928,11 @@
   });
 
   // ---------- Inicio ----------
+  window.Celeste = {
+    map, $, PAL, ramp, steps, extent, merc, unmerc, resample, blur, polygons, legendHTML, bandColor,
+    readPixels, fmtHour, fmtDay, fmtNum, fmtNum1, ago, isToday, toast, openPoint, closePoint, wireTips,
+    RADAR_AREA, radarRain, pointHooks: [],
+  };
   setBase(baseKey);
   renderPanel();
 })();

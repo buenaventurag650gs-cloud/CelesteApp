@@ -33,7 +33,29 @@
       </div>
     </header>
 
+    <div class="idx-cta-wrap">
+      <button id="btnIndice" class="idx-cta" type="button" data-indice-btn aria-pressed="false">
+        <span class="idx-cta-dot" aria-hidden="true"></span>
+        <span><b>Índice CELESTE</b><br><span class="idx-cta-sub">Un solo mapa: ahora y próximas 6 horas</span></span>
+      </button>
+    </div>
+
     <div class="panel-body">
+      <section id="idxPanel" class="idx-panel" hidden>
+        <p class="idx-lead">Pondera lluvia, potencial de tormenta, ráfagas, probabilidad de lluvia y calor en un solo valor de 0 a 100. Toca un punto para ver su evolución y qué pesa más.</p>
+        <div id="idxLegend"></div>
+        <p class="stamp" id="idxStatus"></p>
+        <details class="idx-weights-box">
+          <summary>Ajustar la ponderación</summary>
+          <div id="idxWeights"></div>
+        </details>
+        <details class="about">
+          <summary>Cómo se calcula</summary>
+          <p>Primeras 3 horas: se mide hacia dónde y a qué velocidad se mueve la lluvia comparando las últimas imágenes del radar de COCESNA, y se proyecta hacia adelante. Con el plazo la lluvia proyectada se debilita y se difumina, porque la incertidumbre crece.</p>
+          <p>Desde las 3 horas, y fuera del alcance del radar, se usa el modelo numérico (Open-Meteo, rejilla de 0,3°). El potencial de tormenta, las ráfagas, la probabilidad de lluvia y la sensación térmica vienen del modelo.</p>
+          <p>Es una estimación automática y experimental. Para avisos oficiales consulta al IMN y a la CNE.</p>
+        </details>
+      </section>
       <p class="hint">Activa capas y toca cualquier punto del mapa para ver su pronóstico y su clima histórico.</p>
       <div id="layerGroups"></div>
 
@@ -57,6 +79,7 @@
   <!-- Barra superior móvil -->
   <div class="mobilebar only-mobile">
     <span class="wordmark small">Celeste</span>
+    <button class="pill pill-idx" type="button" data-indice-btn aria-pressed="false">Índice</button>
     <button id="btnOpenPanel" class="pill" type="button" aria-controls="panel" aria-expanded="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5"/></svg>
       Capas
@@ -76,6 +99,19 @@
       </div>
       <div id="tlBars" class="tl-bars" role="slider" tabindex="0" aria-label="Hora de la imagen de radar" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"></div>
       <div class="tl-foot"><span id="tlStart"></span><span>Área con lluvia en el radar</span><span id="tlEnd"></span></div>
+    </div>
+  </section>
+
+  <!-- Línea de tiempo del índice -->
+  <section id="idxTimeline" class="timeline idx-timeline" aria-label="Pronóstico del índice CELESTE" hidden>
+    <button id="idxPlay" class="play" type="button" aria-label="Reproducir el pronóstico">
+      <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+      <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+    </button>
+    <div class="tl-main">
+      <div class="tl-head"><span id="idxTime" class="tl-time">—</span><span id="idxAgo" class="tl-ago"></span></div>
+      <div id="idxBars" class="tl-bars" role="slider" tabindex="0" aria-label="Paso del pronóstico" aria-valuemin="0" aria-valuemax="12" aria-valuenow="0"></div>
+      <div class="tl-foot"><span id="idxStart"></span><span>Índice en el 10 % más alto del país</span><span id="idxEnd"></span></div>
     </div>
   </section>
 
@@ -99,5 +135,6 @@
   <script src="https://cdn.jsdelivr.net/npm/d3-array@3.2.4/dist/d3-array.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3-contour@4.0.2/dist/d3-contour.min.js"></script>
   <script src="/app.js"></script>
+  <script src="/indice.js"></script>
 </body>
 </html>
