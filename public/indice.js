@@ -300,7 +300,7 @@
       computedAt = Date.now();
       const motionTxt = motion ? ` La lluvia se desplaza hacia ${direction(motion.meanX, motion.meanY)} a unos ${C.fmtNum.format(speedKmh(motion.meanX, motion.meanY))} km/h.` : "";
       setStatus(radarOK
-        ? `Radar de las ${C.fmtHour.format(t0)} y modelo de las ${C.fmtHour.format(new Date(model.times[1] * 1000))}.${motionTxt}`
+        ? `Radar de las ${C.fmtHour.format(t0)} y modelo de las ${C.fmtHour.format(new Date(model.times[1] * 1000))}${motionTxt}`
         : "Sin radar en este momento: el índice usa solo el modelo numérico.");
       $("#idxTimeline").hidden = !active;
     } catch (err) {
@@ -572,7 +572,7 @@
       <h3>Índice CELESTE · ${stepLabel(st).toLowerCase()}, ${C.fmtHour.format(st.time)}</h3>
       <div class="idx-now">
         <span class="idx-badge" style="background:${C.bandColor(IDX, v)}">${C.fmtNum.format(v)}</span>
-        <div><b>${className(v)}</b><span class="muted">El punto más alto de las próximas 6 horas: ${C.fmtNum.format(series[peak])} a las ${C.fmtHour.format(steps[peak].time)}.</span></div>
+        <div><b>${className(v)}</b><span class="muted">El punto más alto de las próximas 6 horas: ${C.fmtNum.format(series[peak])} a las ${C.fmtHour.format(steps[peak].time)}</span></div>
       </div>
       <p class="chart-title">Próximas 6 horas</p>
       ${seriesChart(series)}
