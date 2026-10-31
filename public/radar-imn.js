@@ -59,15 +59,46 @@
     ctx.drawImage(bmp, 0, 0);
     const iw = bmp.width, ih = bmp.height;
     const px = ctx.getImageData(0, 0, iw, ih).data;
-    // 1) lluvia por píxel de la imagen (0,24 km)
-    const rain = new Float32Array(iw * ih);
+    // 1) Máscara de lo que es mapa y no radar: textos (blancos/grises) y líneas (marrones, azules),
+    //    ensanchada para cubrir los bordes de color que deja la compresión JPEG alrededor del texto
+    const N0 = iw * ih;
+    const base = new Uint8Array(N0);
+    for (let q = 0, k = 0; q < N0; q++, k += 4) {
+      const r = px[k], g = px[k + 1], b = px[k + 2];
+      const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+      if (mn > 120 && mx - mn < 70) base[q] = 3; // texto
+      else if (r > 90 && r < 230 && g > 50 && g < 150 && b < 110 && r - b > 50 && r > g && mx - mn < 150) base[q] = 1; // fronteras
+      else if (b > 140 && r < 140 && g > 90 && g < 190 && b - r > 50) base[q] = 1; // ríos
+    }
+    const mask = new Uint8Array(N0);
+    for (let j = 0; j < ih; j++) for (let i = 0; i < iw; i++) {
+      const rr = base[j * iw + i];
+      if (!rr) continue;
+      for (let b = -rr; b <= rr; b++) for (let a = -rr; a <= rr; a++) {
+        const y = j + b, x = i + a;
+        if (x >= 0 && y >= 0 && x < iw && y < ih) mask[y * iw + x] = 1;
+      }
+    }
+    // 2) Lluvia por píxel de la imagen (0,24 km)
+    const dbz = new Float32Array(N0).fill(NaN);
     const rpx = RANGE_KM * GEO.pxPerKm;
     for (let j = 0; j < ih; j++) {
       for (let i = 0; i < iw; i++) {
-        if (excluded(i, j) || Math.hypot(i - GEO.cx, j - GEO.cy) > rpx) continue;
-        const k = (j * iw + i) * 4;
-        rain[j * iw + i] = toRain(dbzOf(px[k], px[k + 1], px[k + 2]));
+        const q = j * iw + i;
+        if (mask[q] || excluded(i, j) || Math.hypot(i - GEO.cx, j - GEO.cy) > rpx) continue;
+        const k = q * 4;
+        const v = dbzOf(px[k], px[k + 1], px[k + 2]);
+        if (v != null) dbz[q] = v;
       }
+    }
+    // 3) Se descartan píxeles aislados: un eco real ocupa varias celdas vecinas
+    const rain = new Float32Array(N0);
+    for (let j = 1; j < ih - 1; j++) for (let i = 1; i < iw - 1; i++) {
+      const q = j * iw + i;
+      if (!Number.isFinite(dbz[q])) continue;
+      let n = 0;
+      for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) if ((a || b) && Number.isFinite(dbz[q + b * iw + a])) n++;
+      if (n >= 4) rain[q] = toRain(dbz[q]);
     }
     // 2) a la rejilla común de ~1 km (la misma del radar de COCESNA), promediando 4×4 píxeles
     const A = C.RADAR_AREA, [x0, y0, x1, y1] = A.bbox;
@@ -145,8 +176,8 @@
     try {
       const st = await load();
       draw(st);
-      const when = st.time ? `${C.fmtDay.format(st.time)} ${st.time.getFullYear()}, ${C.fmtHour.format(st.time)}` : "fecha desconocida";
-      $(".stamp", box).textContent = st.fresh ? `Imagen de las ${C.fmtHour.format(st.time)} (${C.ago(st.time)}). Se combina con el radar de COCESNA en el índice.` : `Última imagen publicada por el IMN: ${when}.`;
+      const when = st.time ? st.time.toLocaleDateString("es-CR", { day: "numeric", month: "long", year: "numeric", timeZone: "America/Costa_Rica" }) : "fecha desconocida";
+      $(".stamp", box).textContent = st.fresh ? `Imagen de las ${C.fmtHour.format(st.time)} (${C.ago(st.time)}). Se combina con el radar de COCESNA en el índice.` : `Última actualización de la imagen del IMN: ${when}.`;
       const warn = $(".imn-warn", box);
       warn.hidden = st.fresh;
       warn.textContent = st.fresh ? "" : "El IMN no está actualizando esta imagen, así que lo que se ve no es lluvia actual y no se usa en el índice. Entrará sola cuando el IMN reanude la publicación.";
