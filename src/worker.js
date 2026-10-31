@@ -38,6 +38,9 @@ export default {
       if (url.pathname === "/api/gibs/mapa") return gibsMap(url, ctx);
       if (url.pathname === "/api/gibs/paleta") return gibsPalette(url, ctx);
       if (url.pathname === "/api/celeste/modelo") return modelGrid(ctx);
+      if (url.pathname === "/api/estaciones/imn") return imnStations(url, ctx);
+      if (url.pathname === "/api/estaciones/panama") return panamaStations(ctx);
+      if (url.pathname === "/api/estaciones/aeropuertos") return airports(ctx);
       if (url.pathname === "/api/salud") return json({ ok: true, hora: new Date().toISOString() });
     } catch (err) {
       return json({ error: "El servicio de radar no respondió.", detalle: String(err) }, 502);
@@ -275,7 +278,7 @@ async function modelGrid(ctx) {
       latitude: c.map((p) => p[0]).join(","),
       longitude: c.map((p) => p[1]).join(","),
       hourly: MODEL_VARS.join(","),
-      past_hours: "1",
+      past_hours: "7",
       forecast_hours: "8",
       timezone: "GMT",
       timeformat: "unixtime",
@@ -306,6 +309,89 @@ async function modelGrid(ctx) {
   const res = json({ lats, lons, times, vars: v, generado: new Date().toISOString() }, 200, { "Cache-Control": "public, max-age=1800" });
   ctx.waitUntil(cache.put(key, res.clone()));
   return res;
+}
+
+// ---------- Estaciones ----------
+async function cachedJSON(key, maxAge, ctx, produce) {
+  const cache = caches.default;
+  const k = new Request(key);
+  const hit = await cache.match(k);
+  if (hit) return hit;
+  const data = await produce();
+  const res = json(data, 200, { "Cache-Control": `public, max-age=${maxAge}` });
+  ctx.waitUntil(cache.put(k, res.clone()));
+  return res;
+}
+
+// IMN: tablas horarias de las estaciones automáticas (datos preliminares, sin control de calidad)
+function parseIMNDate(s) {
+  // "31/10/2026 10:00 a. m."
+  const m = s.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*([ap])/i);
+  if (!m) return null;
+  let h = parseInt(m[4], 10) % 12;
+  if (m[6].toLowerCase() === "p") h += 12;
+  return `${m[3]}-${m[2]}-${m[1]}T${String(h).padStart(2, "0")}:${m[5]}:00-06:00`;
+}
+const num = (s) => { const n = parseFloat(String(s).replace(",", ".")); return Number.isFinite(n) ? n : null; };
+
+async function imnTable(t, ctx) {
+  return cachedJSON(`https://celeste.cache/imn/${t}`, 600, ctx, async () => {
+    const r = await fetch(`https://www.imn.ac.cr/especial/tablas/${t}.html`, { headers: { "User-Agent": "CelesteApp/0.1 (visor climatico)" } });
+    if (!r.ok) return { t, filas: [] };
+    const html = await r.text();
+    const rows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].map((m) =>
+      [...m[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((c) => c[1].replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim()));
+    if (!rows.length) return { t, filas: [] };
+    const head = rows[0].map((h) => h.toLowerCase());
+    const iR = head.findIndex((h) => h.includes("lluvia"));
+    const iT = head.findIndex((h) => h.startsWith("temp"));
+    const filas = rows.slice(1, 25).map((c) => [parseIMNDate(c[0] || ""), iR >= 0 ? num(c[iR]) : null, iT >= 0 ? num(c[iT]) : null]).filter((f) => f[0]);
+    return { t, filas };
+  });
+}
+
+async function imnStations(url, ctx) {
+  const list = (url.searchParams.get("t") || "").split(",").filter((t) => /^[a-z0-9]{2,30}$/.test(t)).slice(0, 40);
+  if (!list.length) return json({ error: "Sin estaciones." }, 400);
+  const out = {};
+  await Promise.all(list.map(async (t) => {
+    try { const r = await imnTable(t, ctx); const j = await r.clone().json(); out[t] = j.filas; } catch (e) { out[t] = []; }
+  }));
+  return json({ estaciones: out }, 200, { "Cache-Control": "public, max-age=300" });
+}
+
+// Panamá (IMHPA): lluvia acumulada de 24 horas en estaciones de la región occidental
+async function panamaStations(ctx) {
+  return cachedJSON("https://celeste.cache/panama/lluvia", 900, ctx, async () => {
+    const r = await fetch("https://www.imhpa.gob.pa/es/estaciones-satelitales-data2?sensor=LLUVIA", { headers: { "User-Agent": "CelesteApp/0.1 (visor climatico)" } });
+    if (!r.ok) return { estaciones: [] };
+    const j = await r.json();
+    const est = Object.values(j.estaciones || {}).map((e) => {
+      const lat = num(e.latitud), lon = num(e.longitud);
+      const m = String(e.sensor_fecha || "").match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*([AP])M/i);
+      let iso = null;
+      if (m) { let h = parseInt(m[4], 10) % 12; if (m[6].toUpperCase() === "P") h += 12; iso = `${m[3]}-${m[2]}-${m[1]}T${String(h).padStart(2, "0")}:${m[5]}:00-05:00`; }
+      return [e.nombre, lat, lon, Number.isFinite(e.sensor_valor_sin_format) ? e.sensor_valor_sin_format : num(e.sensor_valor), iso];
+    }).filter((e) => e[1] != null && e[2] != null && e[1] < 10.5 && e[2] < -81.0);
+    return { fuente: "IMHPA (Ley 209 de 2021, uso con cita de la fuente)", estaciones: est };
+  });
+}
+
+// Aeropuertos (METAR): estado del tiempo cada hora
+async function airports(ctx) {
+  return cachedJSON("https://celeste.cache/metar/cr", 600, ctx, async () => {
+    const r = await fetch("https://aviationweather.gov/api/data/metar?bbox=8,-86.2,11.3,-82.5&format=json&hours=3", { headers: { "User-Agent": "CelesteApp/0.1 (visor climatico)" } });
+    if (!r.ok) return { aeropuertos: [] };
+    const j = await r.json();
+    const latest = {};
+    j.forEach((m) => { if (!latest[m.icaoId] || m.obsTime > latest[m.icaoId].obsTime) latest[m.icaoId] = m; });
+    return {
+      aeropuertos: Object.values(latest).map((m) => ({
+        id: m.icaoId, nombre: m.name, lat: m.lat, lon: m.lon, hora: m.obsTime, temp: m.temp,
+        wx: m.wxString || "", nubes: (m.clouds || []).map((c) => c.cover).join(" "), crudo: m.rawOb,
+      })),
+    };
+  });
 }
 
 // ---------- Acceso ----------

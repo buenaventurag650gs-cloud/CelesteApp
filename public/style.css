@@ -272,7 +272,7 @@ body.point-open .leaflet-top.leaflet-right { right: calc(380px + 24px); }
 }
 .idx-cta b { font-family: var(--display); font-weight: 500; font-size: 15px; letter-spacing: 0.01em; }
 .idx-cta-sub { color: var(--muted); font-size: 12.5px; }
-.idx-cta-dot { width: 26px; height: 26px; flex: none; border-radius: 50%; background: conic-gradient(#a9dcef, #9fd7b9, #f2df7a, #f4b25a, #ea7b45, #d9434b, #a8285f, #a9dcef); box-shadow: 0 0 0 3px var(--card-solid), 0 0 0 4px var(--line); }
+.idx-cta-dot { width: 26px; height: 26px; flex: none; border-radius: 50%; background: conic-gradient(#eef6fc, #a8d0ee, #529bd5, #2466aa, #123a70, #0a2652, #eef6fc); box-shadow: 0 0 0 3px var(--card-solid), 0 0 0 4px var(--line); }
 .idx-cta[aria-pressed="true"] { background: var(--accent); color: #fff; }
 .idx-cta[aria-pressed="true"] .idx-cta-sub { color: rgba(255, 255, 255, 0.85); }
 .idx-panel { margin-bottom: 8px; }
@@ -301,3 +301,17 @@ body.point-open .leaflet-top.leaflet-right { right: calc(380px + 24px); }
 @media (max-width: 820px) {
   .idx-cta-wrap { padding: 0 16px 10px; }
 }
+
+/* Estaciones */
+.est-seg { margin: 2px 0 8px; }
+.est-seg button { font-size: 12.5px; padding: 6px 2px; }
+.apt { font: 600 10.5px/18px var(--font); text-align: center; border-radius: 6px; background: var(--card-solid); color: var(--ink); border: 1px solid var(--line); box-shadow: var(--shadow); letter-spacing: 0.02em; }
+.apt-wet { background: var(--accent); color: #fff; border-color: var(--accent); }
+.leaflet-tooltip { font: 12.5px/1.4 var(--font); background: var(--card-solid); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); }
+.leaflet-tooltip .muted { color: var(--muted); }
+.leaflet-tooltip-top:before { border-top-color: var(--card-solid); }
+
+.idx-timeline .tl-bar { min-width: 2px; }
+.idx-timeline .tl-bar.past:not(.current) { opacity: 0.6; }
+.idx-timeline .tl-bar.now { box-shadow: 0 0 0 1.5px var(--ink); }
+.idx-timeline .tl-bar.current { background: var(--ink) !important; }

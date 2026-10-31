@@ -308,6 +308,7 @@
       layers: [
         { key: "radar", type: "radar", name: "Radar de lluvia", desc: "COCESNA, cada 10 minutos. Cubre el norte y el centro del país.", on: true, opacity: 0.8, pal: "rain" },
         { key: "imerg30", type: "field", id: "IMERG_Precipitation_Rate_30min", name: "Lluvia estimada por satélite", desc: "NASA IMERG, cada 30 minutos con unas horas de retraso. Cubre todo el país.", opacity: 0.75, pal: "rain", srcWidth: 124, sigma: 6 },
+        { key: "estaciones", type: "ext", pane: "estaciones", name: "Estaciones de lluvia", desc: "IMN cada hora, Panamá (IMHPA) y aeropuertos. Lo que de verdad cayó en cada punto.", opacity: 1 },
         { key: "imergday", type: "field", id: "IMERG_Precipitation_Rate", name: "Lluvia del último día", desc: "NASA IMERG, total del día anterior.", opacity: 0.75, pal: "rainDay", srcWidth: 124, sigma: 6, scale: 24 },
       ],
     },
@@ -469,6 +470,7 @@
     box.classList.toggle("on", on);
     def._on = on;
     if (def.type === "radar") { on ? radar.enable() : radar.disable(); return; }
+    if (def.type === "ext") { window.Celeste.ext?.[def.key]?.(on, box); return; }
     if (def.type === "field") {
       if (on) loadField(def, box);
       else { const f = fields.get(def.key); if (f?.layer) map.removeLayer(f.layer); fields.delete(def.key); }
@@ -931,7 +933,7 @@
   window.Celeste = {
     map, $, PAL, ramp, steps, extent, merc, unmerc, resample, blur, polygons, legendHTML, bandColor,
     readPixels, fmtHour, fmtDay, fmtNum, fmtNum1, ago, isToday, toast, openPoint, closePoint, wireTips,
-    RADAR_AREA, radarRain, pointHooks: [],
+    RADAR_AREA, radarRain, pointHooks: [], ext: {},
   };
   setBase(baseKey);
   renderPanel();
