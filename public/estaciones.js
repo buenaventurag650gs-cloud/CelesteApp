@@ -54,6 +54,8 @@
   // ---------- Capa ----------
   map.createPane("estaciones").style.zIndex = 460;
   map.getPane("estaciones").classList.add("capa-datos");
+  // Dibujante propio, creado desde el inicio para que conozca el área visible
+  const rend = L.canvas({ pane: "estaciones", padding: 0.3 }).addTo(map);
 
   const RAIN = C.PAL.rain.colors;
   const PALS = {
@@ -86,7 +88,7 @@
       nImn++;
       const c = C.bandColor(p, v);
       L.circleMarker([s.lat, s.lon], {
-        pane: "estaciones", radius: v >= p.levels[0] ? 5 + Math.min(7, Math.sqrt(v) * 1.4) : 3.5,
+        pane: "estaciones", renderer: rend, radius: v >= p.levels[0] ? 5 + Math.min(7, Math.sqrt(v) * 1.4) : 3.5,
         fillColor: c || "#ffffff", fillOpacity: c ? 0.95 : 0.85, color: c ? "#ffffff" : "#5d7488", weight: c ? 1.2 : 1, dashArray: s.q ? null : "2 2",
       }).bindTooltip(`<b>${s.n}</b><br>${C.fmtNum1.format(v)} ${p.units}<br><span class="muted">IMN, ${C.fmtHour.format(new Date(latest))}${s.q ? "" : ". Ubicación aproximada"}</span>`, { direction: "top" }).addTo(group);
     });
@@ -96,7 +98,7 @@
         nPa++;
         const c = C.bandColor(p, s.mm);
         L.circleMarker([s.lat, s.lon], {
-          pane: "estaciones", radius: s.mm >= p.levels[0] ? 5 + Math.min(7, Math.sqrt(s.mm) * 1.4) : 3.5,
+          pane: "estaciones", renderer: rend, radius: s.mm >= p.levels[0] ? 5 + Math.min(7, Math.sqrt(s.mm) * 1.4) : 3.5,
           fillColor: c || "#ffffff", fillOpacity: c ? 0.95 : 0.85, color: c ? "#ffffff" : "#5d7488", weight: c ? 1.2 : 1,
         }).bindTooltip(`<b>${s.n}</b><br>${C.fmtNum1.format(s.mm)} ${p.units}<br><span class="muted">IMHPA Panamá${s.time ? `, ${C.fmtHour.format(new Date(s.time))}` : ""}</span>`, { direction: "top" }).addTo(group);
       });
