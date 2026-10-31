@@ -311,7 +311,7 @@
     if (!serie || !active || mode !== "serie") return;
     const byT = new Map(serie.steps.map((st, i) => [st.time.getTime(), i]));
     C.time.register("estaciones", {
-      label: "Lluvia de estaciones hora a hora (derivado)", short: "Estaciones ±6 h", icon: C.icon("surface"), order: 3,
+      label: "Lluvia de estaciones hora a hora (derivado)", short: "Est. ±6 h", icon: C.icon("surface"), order: 3,
       times: [...byT.keys()], tol: 35 * 60000, step: H1,
       fc: (t) => t > serie.t0,
       value: (t) => clamp(Math.log1p(serie.steps[byT.get(t)].p90) / Math.log1p(15)),

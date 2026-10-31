@@ -346,9 +346,10 @@
   // nubes con topes por debajo de −32 °C se asocian a lluvia convectiva, más intensa cuanto más frías.
   const goesRain = (c) => {
     if (!Number.isFinite(c)) return 0;
+    // Umbral conservador (−38 °C, con transición hasta −45 °C) para no confundir yunques de cirros con lluvia
     const k = c + 273.15;
-    if (k > 241) return 0;
-    return Math.min(72, 1.1183e11 * Math.exp(-3.6382e-2 * Math.pow(k, 1.2)));
+    if (k >= 235) return 0;
+    return Math.min(72, 1.1183e11 * Math.exp(-3.6382e-2 * Math.pow(k, 1.2))) * Math.min(1, (235 - k) / 7);
   };
   const CR_AREA = [7.4, -86.8, 11.8, -81.8];
 
@@ -381,15 +382,15 @@
       icon: "satellite",
       layers: [
         {
-          key: "ir", type: "tiles", icon: "cloud", src: "noaa", time: true, tStep: 10, window: 4, id: "GOES-East_ABI_Band13_Clean_Infrared", level: 6, name: "Nubes por temperatura (GOES-Este)", desc: "Infrarrojo cada 10 minutos. Los topes más fríos son las tormentas más altas.", opacity: 0.7,
+          key: "ir", short: "GOES IR", type: "tiles", icon: "cloud", src: "noaa", time: true, tStep: 10, window: 4, id: "GOES-East_ABI_Band13_Clean_Infrared", level: 6, name: "Nubes por temperatura (GOES-Este)", desc: "Infrarrojo cada 10 minutos. Los topes más fríos son las tormentas más altas.", opacity: 0.7,
           children: [
-            { key: "goesrain", type: "field", icon: "drop", from: ["noaa"], idx: true, time: true, tStep: 10, window: 4, id: "GOES-East_ABI_Band13_Clean_Infrared", tileLevel: 6, level: 6, conv: goesRain, area: CR_AREA, name: "Lluvia estimada por nubes frías", desc: "Se deriva de la temperatura de los topes: más fríos, lluvia más intensa. Cubre todo el país.", opacity: 0.75, pal: "rain", srcWidth: 330, sigma: 1.6 },
+            { key: "goesrain", type: "field", icon: "drop", from: ["noaa"], idx: true, time: true, tStep: 10, window: 4, id: "GOES-East_ABI_Band13_Clean_Infrared", tileLevel: 6, level: 6, conv: goesRain, area: CR_AREA, short: "GOES lluvia", name: "Lluvia estimada por nubes frías", desc: "Se deriva de la temperatura de los topes: más fríos, lluvia más intensa. Cubre todo el país; es la estimación más gruesa.", opacity: 0.75, pal: "rain", srcWidth: 330, sigma: 2.4 },
           ],
         },
-        { key: "imerg30", type: "field", icon: "drop", src: "nasa", idx: true, time: true, tStep: 30, window: 12, id: "IMERG_Precipitation_Rate_30min", name: "Lluvia estimada IMERG", desc: "NASA, cada 30 minutos con unas 5 horas de retraso. Cubre todo el país y el mar.", opacity: 0.75, pal: "rain", srcWidth: 124, sigma: 6 },
-        { key: "geocolor", type: "tiles", icon: "satellite", src: "noaa", time: true, tStep: 10, window: 4, id: "GOES-East_ABI_GeoColor", level: 7, name: "Satélite en color real", desc: "GOES-Este cada 10 minutos. De noche muestra luces y nubes bajas.", opacity: 0.9 },
+        { key: "imerg30", short: "IMERG", type: "field", icon: "drop", src: "nasa", idx: true, time: true, tStep: 30, window: 12, id: "IMERG_Precipitation_Rate_30min", name: "Lluvia estimada IMERG", desc: "NASA, cada 30 minutos con unas 5 horas de retraso. Cubre todo el país y el mar.", opacity: 0.75, pal: "rain", srcWidth: 124, sigma: 6 },
+        { key: "geocolor", short: "GOES color", type: "tiles", icon: "satellite", src: "noaa", time: true, tStep: 10, window: 4, id: "GOES-East_ABI_GeoColor", level: 7, name: "Satélite en color real", desc: "GOES-Este cada 10 minutos. De noche muestra luces y nubes bajas.", opacity: 0.9 },
         { key: "imergday", type: "field", icon: "drop", src: "nasa", id: "IMERG_Precipitation_Rate", name: "Lluvia del último día", desc: "IMERG, total del día anterior.", opacity: 0.75, pal: "rainDay", srcWidth: 124, sigma: 6, scale: 24 },
-        { key: "dust", type: "tiles", icon: "dust", src: "noaa", time: true, tStep: 10, window: 4, id: "GOES-East_ABI_Dust", level: 7, name: "Polvo del Sahara", desc: "GOES-Este. El polvo aparece en tonos rosados.", opacity: 0.75 },
+        { key: "dust", short: "Polvo", type: "tiles", icon: "dust", src: "noaa", time: true, tStep: 10, window: 4, id: "GOES-East_ABI_Dust", level: 7, name: "Polvo del Sahara", desc: "GOES-Este. El polvo aparece en tonos rosados.", opacity: 0.75 },
       ],
     },
     {

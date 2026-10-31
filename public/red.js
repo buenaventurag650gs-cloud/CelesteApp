@@ -310,7 +310,7 @@
     const wet = new Map(times.map((t) => [t, members.filter((m) => { const r = m.rows && near10(m.rows, t); return r && r[1] >= 0.5; }).length]));
     const maxWet = Math.max(1, ...wet.values());
     C.time.register("redimn", {
-      label: "Estaciones automáticas del IMN", short: "IMN estaciones", icon: C.icon("station"), order: 2, times, tol: 35 * 60000, step: H1,
+      label: "Estaciones automáticas del IMN", short: "IMN", icon: C.icon("station"), order: 2, times, tol: 35 * 60000, step: H1,
       value: (t) => wet.get(t) / maxWet,
       show: (t) => { imn.t = t >= latest ? null : t; drawIMN(); },
     });
@@ -444,7 +444,7 @@
       if (times.length) {
         const latest = Math.max(...times);
         C.time.register("redpa", {
-          label: "Estaciones de Panamá (IMHPA)", short: "IMHPA estaciones", icon: C.icon("station"), order: 4, times, tol: 35 * 60000, step: H1,
+          label: "Estaciones de Panamá (IMHPA)", short: "IMHPA", icon: C.icon("station"), order: 4, times, tol: 35 * 60000, step: H1,
           show: (t) => { pa.t = t >= latest ? null : t; drawPA(); },
         });
       }
